@@ -124,7 +124,7 @@ La carpeta `Hardware/` contiene los diseños de PCB del proyecto.
 
 ![Esquemático de Cerberus](CerberusSchemmatics.png)
 
-### CerberusZero_V1.epro
+### CerberusZero.epro
 
 PCB completa del proyecto Cerberus. Incluye el circuito integrado con el RP2040, conectores USB, pantalla OLED y todos los componentes necesarios.
 
