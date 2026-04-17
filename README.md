@@ -185,3 +185,25 @@ Este proyecto no solo es un repositorio: es un espacio abierto para aprender, ex
 - Proteccion Galvanica basada en [USB Isolator ](https://github.com/wagiminator/ADuM3160-USB-Isolator) hecho por _[wagiminator](https://github.com/wagiminator)_
 - Modificado / Creado por:
   - [Erik Alcantara](https://www.linkedin.com/in/erik-alc%C3%A1ntara-covarrubias-29a97628a/)
+
+---
+
+## Patrocinador
+
+<p align="center">
+  <a href="https://www.pcbway.com/">
+    <img src="https://www.pcbway.com/project/img/images/frompcbway-1220.png" alt="PCBWay Logo" width="300">
+  </a>
+</p>
+
+<p align="center">
+  <strong>Este proyecto fue posible gracias al apoyo de <a href="https://www.pcbway.com/">PCBWay</a></strong>
+</p>
+
+Agradecemos a **PCBWay** por patrocinar este proyecto. Su servicio de fabricación de PCBs de alta calidad nos permitió llevar Cerberus del prototipo a la realidad. Si buscas fabricar tus propias PCBs con excelente calidad, precios competitivos y envío rápido, te recomendamos visitar [PCBWay](https://www.pcbway.com/).
+
+---
+
+<p align="center">
+  <em>Seguridad desde México para todos</em>
+</p>
