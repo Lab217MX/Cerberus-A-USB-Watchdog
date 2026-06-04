@@ -3,8 +3,8 @@
 ![Alpha V4 del proyecto](1.jpg)
 
 <p align="center">
-  <strong>Desarrollado por Glitchboi</strong><br>
-  Seguridad desde México para todos
+  <strong>Desarrollado por Lab217</strong><br>
+  Ninguna USB entra sin permiso. NINGUNA
 </p>
 
 ![Estado](https://img.shields.io/badge/status-En_desarollo-gree)
@@ -201,9 +201,3 @@ Este proyecto no solo es un repositorio: es un espacio abierto para aprender, ex
 </p>
 
 Agradecemos a **PCBWay** por patrocinar este proyecto. Su servicio de fabricación de PCBs de alta calidad nos permitió llevar Cerberus del prototipo a la realidad. Si buscas fabricar tus propias PCBs con excelente calidad, precios competitivos y envío rápido, te recomendamos visitar [PCBWay](https://www.pcbway.com/).
-
----
-
-<p align="center">
-  <em>Seguridad desde México para todos</em>
-</p>
