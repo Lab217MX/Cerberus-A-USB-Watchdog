@@ -1,194 +1,233 @@
 # Cerberus
-
-![Alpha V4 del proyecto](1.jpg)
-
 <p align="center">
-  <strong>Desarrollado por Lab217</strong><br>
-  Ninguna USB entra sin permiso. NINGUNA
+  <img src="1.png" alt="Project Poster" width="550">
 </p>
 
-![Estado](https://img.shields.io/badge/status-En_desarollo-gree)
+<p align="center">
+  <strong>Developed by Lab217</strong><br>
+  No USB gets in without permission. NONE
+</p>
+
+<p align="center">
+  <sub>Proudly sponsored by</sub><br>
+  <a href="https://www.pcbway.com/"><img src="https://www.pcbway.com/project/img/images/frompcbway-1220.png" alt="PCBWay" width="150"></a>
+</p>
+
+![Status](https://img.shields.io/badge/status-In_development-green)
 ![License](https://img.shields.io/badge/license-GNU_AGPLv3-blue)
 
----
-
-## Descripción
-
-Este proyecto es un dispositivo compacto diseñado para proteger computadoras de ataques por USB, detectando lecturas o escrituras automáticas que podrían indicar malware, y diferenciando dispositivos maliciosos como Rubber Ducky o USB Killer. A diferencia de otras soluciones que solo cortan las líneas de datos, este dispositivo muestra en tiempo real la actividad USB, brindando visibilidad sobre lo que realmente ocurre. Nace de la necesidad de entender y prevenir ataques físicos de forma proactiva, aportando seguridad con transparencia y control para el usuario.
-
-Enfocado a expertos en ciberseguridad (SOC, blue teamers y red teamers). Cerberus extiende USBvalve para pruebas de USB, debugging de payloads BadUSB y analisis forense basico ante sospecha de infeccion. Muestra actividad de almacenamiento/HID en OLED y por serie para su uso en laboratorio.
+**🌐 [English](README.md) · [Español](README.es.md) · [Português](README.pt.md)**
 
 ---
 
-## Instalación
+## What is Cerberus?
 
-### Prerequisitos
+**Cerberus is a pocket-sized device where you plug in any suspicious USB to see, in real time, what it tries to do to a computer — before you risk your own.**
 
-- Instalar ArduinoIDE
+Instead of blindly trusting a flash drive you found or were handed, you plug it into Cerberus first: the device pretends to be a normal PC, watches how the USB behaves, and instantly warns you if it tries to type on its own (BadUSB / Rubber Ducky), read or write files without permission, or fry the port with a voltage spike (USB Killer). Everything is shown on an OLED screen, a color LED, and over the serial port.
+
+### Key features
+
+- **Detects BadUSB / Rubber Ducky** — spots automated typing that's impossible for a human.
+- **Detects USB Killer** — alerts on high-voltage spikes (and blocks them with the optional isolator).
+- **Watches reads and writes** — warns if the USB tries to read `AUTORUN`/`README` or write/delete files on its own.
+- **Suspicious-device database** — recognizes known attack hardware by its VID/PID.
+- **Full visibility** — OLED screen, NeoPixel LED, and serial console showing everything that happens.
+- **Forensics & red team** — captures keystrokes, exports to DuckyScript, and stores info on the last device.
+
+> Built for cybersecurity professionals (SOC, blue team, and red team) as a USB test bench, BadUSB payload debugger, and basic forensic triage tool. Built on top of [USBvalve](https://github.com/cecio/USBvalve).
+
+---
+
+## Installation
+
+### Prerequisites
+
+- Install the Arduino IDE
 - `Adafruit TinyUSB Library` version `>=3.6.0`
 - `Pico-PIO-USB` version `>=0.7.2`
-- Boards `Raspberry Pi RP2040 (4.5.4)` con CPU Speed at `133MHz` y Tools=>USB Stack en `Adafruit TinyUSB`
+- Boards `Raspberry Pi RP2040 (4.5.4)` with CPU Speed at `133MHz` and Tools => USB Stack set to `Adafruit TinyUSB`
 - `Adafruit_SSD1306` OLED library version `>=2.5.14`
-- Raspberry Pi Pico 1 o 2 (u otra devboars basada en RP2040)
-- Pantalla I2C OLED de 128x64 o 128x32 (SSD1306)
+- Raspberry Pi Pico 1 or 2 (or another RP2040-based dev board)
+- 128x64 or 128x32 I2C OLED display (SSD1306)
 
-### Pasos
+### Steps
 
 ---
 
-#### Usando la version precompilada
+#### Using the precompiled version
 
-Dentro del github ve a releases y busca el archivo .uf2 mas reciente, descargalo
+In GitHub, go to Releases and find the most recent `.uf2` file, then download it.
 
-Para flashear la imagen debes:
+To flash the image:
 
-- Conecta la Raspberry Pi Pico con un cable USB, manten el boton _BOOTSEL/BOOT_ presionado.
-- Suelta el boton.
-- Veremos un nuevo dispositivo en el sistema, llamado `RPI-RP2` (En linux probablemente tendras que hacerlo manualmente).
-- Copia el archivo creado `.uf2` en el folder, dependiendo de la pantalla OLED.
-- Espera unos segundos hasta que desaparezca el dispositivo
+- Connect the Raspberry Pi Pico with a USB cable while holding the _BOOTSEL/BOOT_ button.
+- Release the button.
+- A new device named `RPI-RP2` will appear on your system (on Linux you'll probably have to mount it manually).
+- Copy the `.uf2` file into the folder, depending on your OLED display.
+- Wait a few seconds until the device disappears.
 
-#### Compila tu version
+#### Compile your own version
 
-Obten el repo de forma local
+Get the repo locally:
 
 ```bash
 git clone https://github.com/Glitchboi-sudo/Cerberus-A-USB-Watchdog.git
 ```
 
-Con Arduino IDE
+With the Arduino IDE:
 
-- Abre `Software/Cerberus/Cerberus.ino`.
-- Conecta la Raspberry Pi Pico con un cable USB
-- Selecciona la Pico en Arduino
-- Tools -> USBStack -> Adafruit TinyUSB
-- Click en `Upload`
+- Open `Software/Cerberus/Cerberus.ino`.
+- Connect the Raspberry Pi Pico with a USB cable.
+- Select the Pico in Arduino.
+- Tools -> USB Stack -> Adafruit TinyUSB
+- Click `Upload`.
 
 ---
 
-## Uso
+## Usage
 
-### Inicio
+The idea is simple: **Cerberus sits between your computer and the USB you want to inspect**, acting as a decoy so the suspicious device reveals its real behavior.
 
-1. Conecta la Pico por USB (puerto nativo del RP2040)
-2. La OLED mostrará "Selftest: OK" y el NeoPixel quedará en azul si todo funciona correctamente
-3. Conecta dispositivos USB sospechosos al puerto host para analizarlos
+### Step by step
 
-### Indicadores en pantalla y LED
+1. **Power Cerberus.** Connect it to your computer with a USB cable (the RP2040's native port). On boot, the OLED shows "Selftest: OK" and the LED turns **blue**: ready to go.
+2. **Plug the suspicious USB** into Cerberus's host port (not into your computer).
+3. **Watch the reaction in real time.** Cerberus pretends to be a PC and lets the device act. The screen, the LED, and the serial console tell you immediately what it's trying to do.
+4. **Read the verdict** using the indicator table below: blue = normal, red/orange/magenta = suspicious.
+5. **(Optional) Dig deeper** with the physical buttons to view USB descriptors, or with the serial commands for forensic analysis and keystroke capture.
 
-| Evento                        | Mensaje OLED       | Color LED |
-| ----------------------------- | ------------------ | --------- |
-| Listo/Normal                  | "Cerberus Ready"   | Azul      |
-| Lectura de README             | "README (R)"       | Azul      |
-| Lectura de AUTORUN            | "AUTORUN (R)"      | Azul      |
-| Escritura detectada           | "WRITING"          | Azul      |
-| Borrado detectado             | "DELETING"         | Azul      |
-| Dispositivo HID conectado     | "HID Device"       | Rojo      |
-| HID enviando datos            | "HID Sending data" | Rojo      |
-| Dispositivo sospechoso        | "SUSP: [nombre]"   | Naranja   |
-| Tecleo automatizado (BadUSB)  | "AUTO [X] k/s"     | Magenta   |
-| USB Killer detectado          | "USB Killer"       | Rojo      |
-| Dispositivo de almacenamiento | "Mass Device"      | Verde     |
+### Screen and LED indicators
 
-### Botones físicos
+| Event                       | OLED message       | LED color |
+| --------------------------- | ------------------ | --------- |
+| Ready/Normal                | "Cerberus Ready"   | Blue      |
+| README read                 | "README (R)"       | Blue      |
+| AUTORUN read                | "AUTORUN (R)"      | Blue      |
+| Write detected              | "WRITING"          | Blue      |
+| Delete detected             | "DELETING"         | Blue      |
+| HID device connected        | "HID Device"       | Red       |
+| HID sending data            | "HID Sending data" | Red       |
+| Suspicious device           | "SUSP: [name]"     | Orange    |
+| Automated typing (BadUSB)   | "AUTO [X] k/s"     | Magenta   |
+| USB Killer detected         | "USB Killer"       | Red       |
+| Mass storage device         | "Mass Device"      | Green     |
 
-- **BTN_RST**: Navega por las páginas de descriptores USB del dispositivo conectado
-- **BTN_OK**: Sale de la vista de descriptores / refresca la pantalla
+### Physical buttons
+
+- **BTN_RST**: Cycle through the USB descriptor pages of the connected device
+- **BTN_OK**: Exit the descriptor view / refresh the screen
 - **BOOTSEL**:
-  - Pulsación corta: Reinicia el dispositivo
-  - Pulsación >2s: Muestra el conteo de eventos HID
+  - Short press: Reboot the device
+  - Press >2s: Show the HID event count
 
-### Comandos por puerto serie
+### Serial port commands
 
-Conecta vía serial (SerialTinyUSB) y escribe estos comandos:
+Connect over serial (SerialTinyUSB) and type these commands:
 
-| Comando    | Descripción                                   |
-| ---------- | --------------------------------------------- |
-| `HELP`     | Muestra lista de comandos                     |
-| `STATUS`   | Estado actual del dispositivo                 |
-| `LAST`     | Info forense del último dispositivo conectado |
-| `RESET`    | Reinicia contadores                           |
-| `REBOOT`   | Reinicia el dispositivo                       |
-| `VERBOSE`  | Activa/desactiva modo detallado               |
-| `HEXDUMP`  | Activa/desactiva volcado hexadecimal          |
-| `HIDDEBUG` | Activa/desactiva debug HID (bytes crudos)     |
-| `CLEAR`    | Borra info del último dispositivo             |
+| Command    | Description                                |
+| ---------- | ------------------------------------------ |
+| `HELP`     | Show the list of commands                  |
+| `STATUS`   | Current device status                      |
+| `LAST`     | Forensic info on the last connected device |
+| `RESET`    | Reset counters                             |
+| `REBOOT`   | Reboot the device                          |
+| `VERBOSE`  | Toggle verbose mode                        |
+| `HEXDUMP`  | Toggle hex dump                            |
+| `HIDDEBUG` | Toggle HID debug (raw bytes)               |
+| `CLEAR`    | Clear info on the last device              |
+
+---
+
+## How does it detect threats?
+
+Cerberus doesn't just cut the data lines: **it impersonates a real computer** so the suspicious device reveals its intentions, and it watches four fronts at once.
+
+- **Automated typing (BadUSB / Rubber Ducky).** Cerberus measures the keystroke rate of the emulated keyboard. No human types dozens of keys per second, so when it crosses that threshold it flags an automated attack and shows the detected speed.
+
+- **Malicious reads and writes.** Cerberus exposes a small virtual disk with bait files (`README`, `AUTORUN`). If a USB — or the malware on it — tries to read those files automatically, or write/delete content without your input, it's exposed instantly.
+
+- **Known attack devices.** On connection, Cerberus reads the device identifiers (VID/PID) and compares them against a database of known attack hardware, warning you if it recognizes one.
+
+- **USB Killer.** A hardware circuit monitors the port voltage; on a high-voltage spike it fires an immediate alert. With the galvanic isolator, the discharge is also **physically blocked** so it never reaches your computer.
+
+Each detection is turned right away into a message on the OLED, an LED color, and a line over the serial port, giving you a clear verdict without having to risk a real machine.
 
 ---
 
 ## Hardware
 
-La carpeta `Hardware/` contiene los diseños de PCB del proyecto.
+The `Hardware/` folder contains the project's PCB designs.
 
-### Esquemático
+### Schematic
 
-![Esquemático de Cerberus](CerberusSchemmatics.png)
+📄 [Cerberus schematic (PDF)](SCH_Schematic1_2026-06-15.pdf)
 
 ### CerberusZero.epro
 
-PCB completa del proyecto Cerberus. Incluye el circuito integrado con el RP2040, conectores USB, pantalla OLED y todos los componentes necesarios.
+The complete Cerberus PCB. Includes the integrated circuit with the RP2040, USB connectors, OLED display, and all necessary components.
 
-- **Formato**: Proyecto de EasyEDA Pro
-- **Cómo abrir**: Importar en EasyEDA Pro desde `Archivo → Abrir`
+- **Format**: EasyEDA Pro project
+- **How to open**: Import into EasyEDA Pro from `File → Open`
 
 ### ADUM3160 USB Isolator
 
-Módulo de aislamiento galvánico USB basado en el chip ADUM3160. Proporciona **protección contra ataques USB-Killer** al aislar eléctricamente el host del dispositivo, bloqueando picos de alto voltaje.
+A USB galvanic isolation module based on the ADUM3160 chip. Provides **protection against USB-Killer attacks** by electrically isolating the host from the device, blocking high-voltage spikes.
 
-- **Uso**: Complemento opcional para añadir una capa extra de seguridad física
-- **Velocidad**: USB 2.0 Full Speed (12 Mbps)
-- **Más información**: Ver `Hardware/ADUM3160 USB Isolator/README.md`
+- **Use**: Optional add-on for an extra layer of physical security
+- **Speed**: USB 2.0 Full Speed (12 Mbps)
+- **More info**: See `Hardware/ADUM3160 USB Isolator/README.md`
 
 ---
 
-## Arquitectura del Software
+## Software Architecture
 
 ### Firmware (Cerberus.ino)
 
-El firmware utiliza ambos cores del RP2040:
+The firmware uses both cores of the RP2040:
 
-- **Core 0**: Maneja la interfaz de usuario (OLED, LED NeoPixel, botones) y emula un dispositivo de almacenamiento USB para detectar actividad sospechosa del host.
-- **Core 1**: Ejecuta el stack USB Host via PIO para monitorear dispositivos conectados (HID, Mass Storage, CDC).
+- **Core 0**: Handles the user interface (OLED, NeoPixel LED, buttons) and emulates a USB storage device to detect suspicious host activity.
+- **Core 1**: Runs the USB Host stack via PIO to monitor connected devices (HID, Mass Storage, CDC).
 
-**Modulos principales:**
+**Main modules:**
 
-- **Deteccion de amenazas**: USB Killer (via interrupcion hardware), dispositivos sospechosos (base de datos VID/PID), y escritura automatizada BadUSB (analisis de velocidad HID).
-- **Emulacion MSC**: Disco RAM virtual que detecta lecturas de README/AUTORUN y escrituras maliciosas.
-- **Procesamiento HID**: Decodificacion de reportes de teclado/mouse con soporte para modificadores y teclas especiales.
-- **Interfaz OLED**: GUI con iconos, estados y vista de descriptores USB.
-- **Comandos serial**: Interface de texto para debugging y forense (HELP, STATUS, LAST, HEXDUMP, etc.).
+- **Threat detection**: USB Killer (via hardware interrupt), suspicious devices (VID/PID database), and automated BadUSB writing (HID speed analysis).
+- **MSC emulation**: Virtual RAM disk that detects README/AUTORUN reads and malicious writes.
+- **HID processing**: Decoding of keyboard/mouse reports with support for modifiers and special keys.
+- **OLED interface**: GUI with icons, states, and a USB descriptor view.
+- **Serial commands**: Text interface for debugging and forensics (HELP, STATUS, LAST, HEXDUMP, etc.).
 
 ### Companion App (cerberus_listener.py)
 
-Aplicacion GUI en Python/Tkinter para monitoreo en tiempo real:
+A Python/Tkinter GUI app for real-time monitoring:
 
-- **Conexion serial**: Auto-deteccion del dispositivo, reconexion automatica.
-- **Log con filtros**: Colores por severidad, busqueda, filtrado por categoria.
-- **Analizador de payloads**: Detecta patrones de ataque (GUI+R, powershell, etc.) y calcula velocidad de tecleo.
-- **Modo Red Team**: Exportacion de keystrokes capturados a DuckyScript, comandos rapidos, filtro para bug CTRL del Flipper Zero.
-
----
-
-## Contribuir
-
-Este proyecto no solo es un repositorio: es un espacio abierto para aprender, experimentar y construir juntos. **Buscamos activamente contribuciones**, ya sea en la parte técnica o incluso en la documentación.
-
-- **En hardware:** Si detectas oportunidades para mejorar la eficiencia (por ejemplo, usando otros chips, optimizando el consumo de energía o cambiando componentes por alternativas más confiables), ¡tus sugerencias son bienvenidas!
-- **En software:** Desde corrección de bugs, optimización de rendimiento, hasta mejoras en la legibilidad del código o documentación; todo aporte, grande o pequeño, suma muchísimo.
-  No necesitas ser experto para ayudar: si crees que algo puede explicarse mejor, que el código puede ser más claro, o que hay una forma más elegante de hacer algo, **cuéntanos o abre un Pull Request**.
+- **Serial connection**: Auto-detection of the device, automatic reconnection.
+- **Filtered log**: Severity colors, search, category filtering.
+- **Payload analyzer**: Detects attack patterns (GUI+R, powershell, etc.) and computes typing speed.
+- **Red Team mode**: Export of captured keystrokes to DuckyScript, quick commands, filter for the Flipper Zero CTRL bug.
 
 ---
 
-## Créditos
+## Contributing
 
-- Proyecto basado en [USBvalve](https://github.com/cecio/USBvalve) hecho por _[Cecio](https://github.com/cecio)_
-- Proteccion Galvanica basada en [USB Isolator ](https://github.com/wagiminator/ADuM3160-USB-Isolator) hecho por _[wagiminator](https://github.com/wagiminator)_
-- Modificado / Creado por:
+This project isn't just a repository: it's an open space to learn, experiment, and build together. **We actively welcome contributions**, whether on the technical side or even the documentation.
+
+- **On hardware:** If you spot opportunities to improve efficiency (for example, using other chips, optimizing power consumption, or swapping components for more reliable alternatives), your suggestions are welcome!
+- **On software:** From bug fixes and performance optimization to improvements in code readability or documentation; every contribution, big or small, adds up.
+  You don't need to be an expert to help: if you think something can be explained better, that the code can be clearer, or that there's a more elegant way to do something, **tell us or open a Pull Request**.
+
+---
+
+## Credits
+
+- Project based on [USBvalve](https://github.com/cecio/USBvalve) made by _[Cecio](https://github.com/cecio)_
+- Galvanic protection based on [USB Isolator](https://github.com/wagiminator/ADuM3160-USB-Isolator) made by _[wagiminator](https://github.com/wagiminator)_
+- Modified / Created by:
   - [Erik Alcantara](https://www.linkedin.com/in/erik-alc%C3%A1ntara-covarrubias-29a97628a/)
 
 ---
 
-## Patrocinador
+## Sponsor
 
 <p align="center">
   <a href="https://www.pcbway.com/">
@@ -197,7 +236,7 @@ Este proyecto no solo es un repositorio: es un espacio abierto para aprender, ex
 </p>
 
 <p align="center">
-  <strong>Este proyecto fue posible gracias al apoyo de <a href="https://www.pcbway.com/">PCBWay</a></strong>
+  <strong>This project was made possible thanks to the support of <a href="https://www.pcbway.com/">PCBWay</a></strong>
 </p>
 
-Agradecemos a **PCBWay** por patrocinar este proyecto. Su servicio de fabricación de PCBs de alta calidad nos permitió llevar Cerberus del prototipo a la realidad. Si buscas fabricar tus propias PCBs con excelente calidad, precios competitivos y envío rápido, te recomendamos visitar [PCBWay](https://www.pcbway.com/).
+We thank **PCBWay** for sponsoring this project. Their high-quality PCB manufacturing service let us take Cerberus from prototype to reality. If you're looking to manufacture your own PCBs with excellent quality, competitive prices, and fast shipping, we recommend visiting [PCBWay](https://www.pcbway.com/).
