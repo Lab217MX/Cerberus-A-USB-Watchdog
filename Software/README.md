@@ -25,6 +25,7 @@ Software/
 Firmware principal que implementa:
 
 - **Emulación MSC**: Disco RAM virtual que detecta lecturas de README/AUTORUN y escrituras sospechosas
+- **Neutralizador de particiones**: Borrado manual de las tablas MBR/GPT del USB montado en el puerto host (portado desde [USB-Neutralizer](https://github.com/novamostra/USB-Neutralizer)). Se dispara manteniendo pulsado el botón "Bak" ~3 s o con el comando serial `WIPE`; nunca de forma automática al montar
 - **Host USB (PIO-USB)**: Monitoreo de dispositivos HID, Mass Storage y CDC
 - **Detección de amenazas**: USB Killer, dispositivos sospechosos (base de datos VID/PID), tecleo automatizado (BadUSB)
 - **Interfaz OLED**: GUI con iconos, estados y vista de descriptores USB
@@ -47,7 +48,7 @@ Recursos gráficos (bitmaps) para la pantalla OLED: iconos de estado, alertas y 
 | ------ | ------------ | --------------------------------------------------------- |
 | GPIO0  | USB Host D+  | PIO-USB (HOST_PIN_DP)                                     |
 | GPIO1  | USB Host D-  | PIO-USB (D+ + 1)                                          |
-| GPIO3  | BTN_RST      | Botón para navegar descriptores USB (INPUT_PULLUP)        |
+| GPIO3  | BTN_RST      | "Bak": corto = navegar descriptores; mantener ~3 s con USB montado = borrar tablas MBR/GPT (INPUT_PULLUP) |
 | GPIO4  | I2C SDA      | Pantalla OLED SSD1306                                     |
 | GPIO5  | I2C SCL      | Pantalla OLED SSD1306                                     |
 | GPIO6  | BTN_OK       | Botón para salir de vista descriptores (INPUT_PULLUP)     |
@@ -109,3 +110,10 @@ Si no auto-detecta el puerto, selecciónalo manualmente en el combo y pulsa "Con
 2. Configura: `Tools → USB Stack → Adafruit TinyUSB`
 3. Sube el firmware a la Pico
 4. Conecta al PC y observa mensajes en la OLED y por `SerialTinyUSB`
+
+---
+
+## Créditos
+
+- Emulación MSC y detección de amenazas basadas en [USBvalve](https://github.com/cecio/USBvalve) de [Cecio](https://github.com/cecio)
+- Neutralizador de particiones (borrado de tablas MBR/GPT) portado desde [USB-Neutralizer](https://github.com/novamostra/USB-Neutralizer) de [novamostra](https://github.com/novamostra)

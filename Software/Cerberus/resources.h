@@ -16,7 +16,7 @@ static const unsigned char PROGMEM image_usb_cable_connected_bits[] = {
   0x00,0xf8,0x00,0x30,0x00,0x00,0x00,0x00
 };
 
-// Alert triangle (16x16 = 32 bytes) - Fixed dimensions!
+// Alert triangle (16x16 = 32 bytes)
 static const unsigned char PROGMEM image_Alert_bits[] = {
   0x00,0x00,0x01,0x80,0x02,0x40,0x02,0x40,
   0x04,0x20,0x09,0x90,0x09,0x90,0x11,0x88,
@@ -24,7 +24,7 @@ static const unsigned char PROGMEM image_Alert_bits[] = {
   0x81,0x81,0x80,0x01,0x7f,0xfe,0x00,0x00
 };
 
-// Evil smile / skull (24x21 = 63 bytes) - Fixed dimensions!
+// Evil smile / skull (24x21 = 63 bytes)
 static const unsigned char PROGMEM image_EviSmile1_bits[] = {
   0x30,0x03,0x00,0x60,0x01,0x80,0xe0,0x01,0xc0,
   0xf3,0xf3,0xc0,0xff,0xff,0xc0,0xff,0xff,0xc0,
@@ -43,8 +43,8 @@ typedef struct {
 
 static const LogoAsset LOGO_ASSETS[] = {
   { image_usb_cable_connected_bits, 16, 16 },  // USB cable
-  { image_Alert_bits, 16, 16 },                // Alert triangle (was 16x24, wrong!)
-  { image_EviSmile1_bits, 24, 21 },            // Evil smile (was 16x24, wrong!)
+  { image_Alert_bits, 16, 16 },                // Alert triangle
+  { image_EviSmile1_bits, 24, 21 },            // Evil smile
 };
 
 static constexpr size_t LOGO_COUNT = sizeof(LOGO_ASSETS) / sizeof(LOGO_ASSETS[0]);

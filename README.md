@@ -34,6 +34,7 @@ Instead of blindly trusting a flash drive you found or were handed, you plug it 
 - **Suspicious-device database** — recognizes known attack hardware by its VID/PID.
 - **Full visibility** — OLED screen, NeoPixel LED, and serial console showing everything that happens.
 - **Forensics & red team** — captures keystrokes, exports to DuckyScript, and stores info on the last device.
+- **Neutralize suspicious drives** — manually wipe the MBR/GPT tables of the mounted USB (hold "Bak" ~3 s or the `WIPE` command); never triggered automatically.
 
 > Built for cybersecurity professionals (SOC, blue team, and red team) as a USB test bench, BadUSB payload debugger, and basic forensic triage tool. Built on top of [USBvalve](https://github.com/cecio/USBvalve).
 
@@ -112,10 +113,14 @@ The idea is simple: **Cerberus sits between your computer and the USB you want t
 | Automated typing (BadUSB)   | "AUTO [X] k/s"     | Magenta   |
 | USB Killer detected         | "USB Killer"       | Red       |
 | Mass storage device         | "Mass Device"      | Green     |
+| Wipe countdown              | "Hold: WIPE Ns"    | —         |
+| Wipe in progress            | "WIPING DISK"      | —         |
+| Wipe complete               | "WIPE DONE"        | —         |
+| Wipe error                  | "WIPE ERROR"       | —         |
 
 ### Physical buttons
 
-- **BTN_RST**: Cycle through the USB descriptor pages of the connected device
+- **BTN_RST** ("Bak"): A short press cycles through the USB descriptor pages; holding it ~3 s with a storage device mounted neutralizes its MBR/GPT tables (wipe)
 - **BTN_OK**: Exit the descriptor view / refresh the screen
 - **BOOTSEL**:
   - Short press: Reboot the device
@@ -136,6 +141,7 @@ Connect over serial (SerialTinyUSB) and type these commands:
 | `HEXDUMP`  | Toggle hex dump                            |
 | `HIDDEBUG` | Toggle HID debug (raw bytes)               |
 | `CLEAR`    | Clear info on the last device              |
+| `WIPE`     | Neutralize the MBR/GPT tables of the mounted USB |
 
 ---
 
@@ -222,6 +228,7 @@ This project isn't just a repository: it's an open space to learn, experiment, a
 
 - Project based on [USBvalve](https://github.com/cecio/USBvalve) made by _[Cecio](https://github.com/cecio)_
 - Galvanic protection based on [USB Isolator](https://github.com/wagiminator/ADuM3160-USB-Isolator) made by _[wagiminator](https://github.com/wagiminator)_
+- Partition neutralizer (MBR/GPT table wiping) ported from [USB-Neutralizer](https://github.com/novamostra/USB-Neutralizer) made by _[novamostra](https://github.com/novamostra)_
 - Modified / Created by:
   - [Erik Alcantara](https://www.linkedin.com/in/erik-alc%C3%A1ntara-covarrubias-29a97628a/)
 

@@ -52,10 +52,8 @@ extern "C" {
 #define HOST_PIN_DP 0       // Pin used as D+ for host, D- = D+ + 1
 #define LANGUAGE_ID 0x0409  // English
 
-// USB Host object
 Adafruit_USBH_Host USBHost;
 
-// USB_Desc Structure
 typedef struct {
   tusb_desc_device_t desc_device;
   uint16_t manufacturer[32];
@@ -67,7 +65,6 @@ typedef struct {
 // CFG_TUH_DEVICE_MAX is defined by tusb_config header
 dev_info_t dev_info[CFG_TUH_DEVICE_MAX] = { 0 };
 
-// END of BADUSB detector section
 
 #define I2C_ADDRESS 0x3C  // 0X3C+SA0 - 0x3C or 0x3D
 #define RST_PIN -1        // No external reset pin required by this OLED
@@ -80,7 +77,6 @@ typedef struct {
   char text[64];
 } DisplayMsg;
 
-// Forward declarations
 void cls(void);
 void show_descriptor_page();
 void exit_descriptor_view();
@@ -114,7 +110,7 @@ Adafruit_USBD_MSC usb_msc;
 //
 // USBvalve globals
 //
-#define VERSION "Cerberus - 0.4.0"
+#define VERSION "Cerberus - 1.1.0"
 boolean readme = false;
 boolean autorun = false;
 boolean written = false;
@@ -178,7 +174,6 @@ typedef struct {
 
 last_device_info_t last_device __attribute__((section(".noinit")));  // Survives soft reset
 
-// Forward declarations for new functions
 void process_serial_command(const char* cmd);
 void print_status();
 void print_last_device();
@@ -187,6 +182,53 @@ void update_hid_speed();
 
 Adafruit_NeoPixel statusPixel(NEOPIXEL_COUNT, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 queue_t display_queue;  // Thread-safe queue for cross-core OLED messages
+
+//
+// USB Neutralizer (partition-table wiper)
+//
+// Ported from the standalone USB-Neutralizer project by novamostra
+// (https://github.com/novamostra/USB-Neutralizer).
+//
+// When a USB mass-storage device is attached to the HOST port and the user holds the "Bak" button, the
+// first and last WIPE_LIMIT_LBA blocks are overwritten with zeros. That destroys
+// the MBR / GPT primary header + GPT backup header and the FAT/boot area, so the
+// drive can no longer be mounted until it is re-partitioned, WITHOUT touching any
+// (potentially malicious) file payload in between.
+//
+// All tuh_msc_* calls must run on core1 (where the USB host stack lives). The
+// buttons are read on core0, so the trigger is handed to core1 through the
+// volatile flags below.
+//
+#define WIPE_LIMIT_LBA   34    // Blocks wiped at the start (and at the end) of the disk
+#define WIPE_BLOCK_SIZE  512   // Logical block size we support (bytes)
+#define WIPE_HOLD_MS     3000  // How long "Bak" must be held to launch a wipe
+
+typedef struct {
+  uint8_t  dev_addr;
+  uint32_t current_lba;
+  uint32_t block_count;
+  uint8_t  phase;                     // 0 = wiping head, 1 = wiping tail
+  bool     is_wiping;
+  uint8_t  buffer[WIPE_BLOCK_SIZE];   // Always-zero source buffer
+} WipeState;
+
+WipeState wipe = { 0 };
+
+// Cross-core signalling between the buttons (core0) and the host stack (core1)
+volatile bool    msc_mounted      = false;  // A mass-storage device is attached
+volatile uint8_t msc_dev_addr     = 0;      // Its host address
+volatile bool    wipe_requested   = false;  // Core0 asks core1 to start a wipe
+volatile bool    wipe_in_progress = false;  // Mirror of wipe.is_wiping, read by core0
+volatile bool    wipe_done        = false;  // Core1 finished successfully
+volatile bool    wipe_error       = false;  // Core1 aborted with an error
+bool wipe_done_reported  = false;           // Core0 one-shot render guards
+bool wipe_error_reported = false;
+
+// Forward declarations (implemented in the host-devices section)
+void start_wipe_process(uint8_t dev_addr);
+void process_next_block();
+bool wipe_write_complete_cb(uint8_t dev_addr, tuh_msc_complete_data_t const* cb_data);
+void service_wipe();
 
 //
 // Anti-Detection settings.
@@ -200,10 +242,10 @@ queue_t display_queue;  // Thread-safe queue for cross-core OLED messages
 // Example:
 // 0x0951 0x16D5    VENDORID_STR: Kingston   PRODUCTID_STR: DataTraveler
 //
-#define USB_VENDORID 0x0951               // This override the Pi Pico default 0x2E8A
-#define USB_PRODUCTID 0x16D5              // This override the Pi Pico default 0x000A
-#define USB_DESCRIPTOR "DataTraveler"     // This override the Pi Pico default "Pico"
-#define USB_MANUF "Kingston"              // This override the Pi Pico default "Raspberry Pi"
+#define USB_VENDORID 0x0951
+#define USB_PRODUCTID 0x16D5
+#define USB_DESCRIPTOR "DataTraveler"
+#define USB_MANUF "Kingston"
 #define USB_SERIAL "123456789A"           // This override the Pi Pico default. Disabled by default. \
                                           // See "setSerialDescriptor" in setup() if needed
 #define USB_VENDORID_STR "Kingston"       // Up to 8 chars
@@ -284,7 +326,6 @@ const suspicious_device_t SUSPICIOUS_DEVICES[] PROGMEM = {
 
 #define SUSPICIOUS_COUNT (sizeof(SUSPICIOUS_DEVICES) / sizeof(SUSPICIOUS_DEVICES[0]) - 1)
 
-// Forward declaration
 const char* check_suspicious_device(uint16_t vid, uint16_t pid);
 
 #define BLOCK_AUTORUN 102       // Block where Autorun.inf file is saved
@@ -308,11 +349,9 @@ void setup() {
   // Init queue used to pass text from host callbacks (core1) to OLED (core0)
   queue_init(&display_queue, sizeof(DisplayMsg), 16);
 
-  // Change all the USB Pico settings
   TinyUSBDevice.setID(USB_VENDORID, USB_PRODUCTID);
   TinyUSBDevice.setProductDescriptor(USB_DESCRIPTOR);
   TinyUSBDevice.setManufacturerDescriptor(USB_MANUF);
-  // This could be used to change the serial number as well
   TinyUSBDevice.setSerialDescriptor(USB_SERIAL);
 
 #if defined(ARDUINO_ARCH_MBED) && defined(ARDUINO_ARCH_RP2040)
@@ -327,7 +366,6 @@ void setup() {
   // Set disk size (using the "fake" size)
   usb_msc.setCapacity(FAKE_DISK_BLOCK_NUM, DISK_BLOCK_SIZE);
 
-  // Set the callback functions
   usb_msc.setReadWriteCallback(msc_read_callback, msc_write_callback, msc_flush_callback);
 
   // Set Lun ready (RAM disk is always ready)
@@ -355,20 +393,19 @@ void setup() {
   Wire.setSCL(5);
   display.begin(SSD1306_SWITCHCAPVCC, I2C_ADDRESS);
 
-  cls();  // Clear display
+  cls();
   draw(current_gui_message, current_logo_index);
   statusPixel.begin();
   statusPixel.setBrightness(50);
   setNeoColor(0, 0, 255);  // Blue as the initial neutral status
 
-  // Now outputs the result of the check
   if (computed_hash == valid_hash) {
     showStatus("Selftest: OK", LOGO_USB_CONNECTED);
   } else {
     showStatus("Selftest: KO", LOGO_ALERT_SYMBOL);
     showStatus("Stopping...", LOGO_ALERT_SYMBOL);
     while (1) {
-      delay(1000);  // Loop forever
+      delay(1000);
     }
   }
 
@@ -381,7 +418,6 @@ void setup1() {
   pio_cfg.pin_dp = HOST_PIN_DP;
   USBHost.configure_pio_usb(1, &pio_cfg);
 
-  // run host stack on controller (rhport) 1
   // Note: For rp2040 pico-pio-usb, calling USBHost.begin() on core1 will have most of the
   // host bit-banging processing works done in core1
   USBHost.begin(1);
@@ -413,12 +449,25 @@ void loop() {
     }
   }
 
-  static bool rst_prev = true;
+  //
+  // "Bak" button (BTN_RST):
+  //   - short press -> browse the USB descriptor pages (original behaviour)
+  //   - hold >= WIPE_HOLD_MS while a mass-storage device is mounted -> wipe it
+  //
+  static bool     rst_prev = true;
+  static uint32_t bak_press_start = 0;
+  static bool     bak_wipe_fired = false;   // Ensures a single wipe per hold
+  static bool     bak_countdown = false;    // A wipe countdown is on screen
+  static uint32_t bak_last_hint = 0;        // Throttles the countdown redraws
   bool rst_now = digitalRead(BTN_RST);
   if (rst_now != rst_prev) {
     SerialTinyUSB.printf("BTN_RST %s\n", rst_now == LOW ? "PRESSED -> descriptors" : "released");
     rst_prev = rst_now;
     if (rst_now == LOW) {
+      bak_press_start = to_ms_since_boot(get_absolute_time());
+      bak_wipe_fired = false;
+      bak_countdown = false;
+      bak_last_hint = 0;
       if (descriptor_view_active == false) {
         descriptor_view_active = true;
         descriptor_page = 0;
@@ -426,6 +475,47 @@ void loop() {
         descriptor_page++;
       }
       show_descriptor_page();
+    } else {
+      bak_press_start = 0;
+      // Released in time while a wipe countdown was showing: cancel and restore
+      if (bak_countdown && !bak_wipe_fired && !wipe_in_progress) {
+        bak_countdown = false;
+        descriptor_view_active = false;
+        descriptor_page = 0;
+        draw(current_gui_message, current_logo_index);
+      }
+    }
+  }
+
+  // Sustained hold detection: only arms while a mass-storage device is mounted.
+  if (rst_now == LOW && bak_press_start != 0 && !bak_wipe_fired &&
+      msc_mounted && !wipe_in_progress) {
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    uint32_t held = now - bak_press_start;
+    if (held >= WIPE_HOLD_MS) {
+      // Fire the wipe: core1 (host stack) picks up wipe_requested in loop1()
+      bak_wipe_fired = true;
+      bak_countdown = false;
+      descriptor_view_active = false;
+      descriptor_page = 0;
+      wipe_done = false;
+      wipe_error = false;
+      wipe_done_reported = false;
+      wipe_error_reported = false;
+      wipe_requested = true;
+      showStatus("WIPING DISK", LOGO_ALERT_SYMBOL);
+      setNeoColor(255, 165, 0);
+    } else if (held >= 700 && (now - bak_last_hint) >= 300) {
+      // Warn with a countdown so an accidental hold can be released in time.
+      // Use draw() (not showStatus) so the cached normal status is preserved.
+      bak_last_hint = now;
+      bak_countdown = true;
+      descriptor_view_active = false;
+      descriptor_page = 0;
+      uint32_t remain = (WIPE_HOLD_MS - held + 999) / 1000;
+      char hint[24];
+      snprintf(hint, sizeof(hint), "Hold: WIPE %lus", (unsigned long)remain);
+      draw(hint, LOGO_ALERT_SYMBOL);
     }
   }
 
@@ -452,40 +542,40 @@ void loop() {
   if (usbkiller == true) {
     showStatus("USB Killer", LOGO_EVIL_SYMBOL);
     usbkiller = false;
-    setNeoColor(255, 0, 0);       // Red
+    setNeoColor(255, 0, 0);
   }
 
   if (readme == true) {
     showStatus("README (R)", LOGO_USB_CONNECTED);
     readme = false;
-    setNeoColor(0, 0, 255);       // Blue
+    setNeoColor(0, 0, 255);
   }
 
   if (autorun == true) {
     showStatus("AUTORUN (R)", LOGO_USB_CONNECTED);
     autorun = false;
-    setNeoColor(0, 0, 255);       // Blue
+    setNeoColor(0, 0, 255);
   }
 
   if (deleted == true && deleted_reported == false) {
     showStatus("DELETING", LOGO_USB_CONNECTED);
     deleted = false;
     deleted_reported = true;
-    setNeoColor(0, 0, 255);       // Blue
+    setNeoColor(0, 0, 255);
   }
 
   if (written == true && written_reported == false) {
     showStatus("WRITING", LOGO_USB_CONNECTED);
     written = false;
     written_reported = true;
-    setNeoColor(0, 0, 255);       // Blue
+    setNeoColor(0, 0, 255);
   }
 
   if (hid_sent == true && hid_reported == false) {
     showStatus("HID Sending data", LOGO_ALERT_SYMBOL);
     hid_sent = false;
     hid_reported = true;
-    setNeoColor(255, 0, 0);       // Red
+    setNeoColor(255, 0, 0);
   }
 
   if (suspicious_device == true && suspicious_reported == false) {
@@ -494,21 +584,33 @@ void loop() {
     showStatus(alert_msg, LOGO_EVIL_SYMBOL);
     suspicious_device = false;
     suspicious_reported = true;
-    setNeoColor(255, 165, 0);     // Orange for suspicious
+    setNeoColor(255, 165, 0);
   }
 
-  // HID Speed detection - automated typing alert
   if (hid_speed_alert == true && hid_speed_reported == false) {
     char speed_msg[24];
     snprintf(speed_msg, sizeof(speed_msg), "AUTO %.0f k/s", hid_current_speed);
     showStatus(speed_msg, LOGO_EVIL_SYMBOL);
     SerialTinyUSB.printf("[!!!] AUTOMATED TYPING: %.1f keys/sec\r\n", hid_current_speed);
     hid_speed_reported = true;
-    setNeoColor(255, 0, 255);     // Magenta for automated typing
+    setNeoColor(255, 0, 255);
     // Update last device info
     if (hid_current_speed > last_device.max_hid_speed) {
       last_device.max_hid_speed = hid_current_speed;
     }
+  }
+
+  // Partition-wipe outcome (flags are set by core1 in wipe_write_complete_cb)
+  if (wipe_done == true && wipe_done_reported == false) {
+    showStatus("WIPE DONE", LOGO_USB_CONNECTED);
+    wipe_done_reported = true;
+    setNeoColor(0, 255, 0);
+  }
+
+  if (wipe_error == true && wipe_error_reported == false) {
+    showStatus("WIPE ERROR", LOGO_EVIL_SYMBOL);
+    wipe_error_reported = true;
+    setNeoColor(255, 0, 0);
   }
 
   if (BOOTSEL) {
@@ -535,6 +637,7 @@ void loop() {
 // Main Core1 loop: managing USB Host
 void loop1() {
   USBHost.task();
+  service_wipe();  // Starts a wipe on the host core when core0 requested one
 }
 
 // Callback invoked when received READ10 command.
@@ -598,7 +701,6 @@ int32_t msc_write_callback(uint32_t lba, uint8_t* buffer, uint32_t bufsize) {
   // We are declaring a bigger size than what is actually allocated, so
   // this is protecting our memory integrity
   if (lba < DISK_BLOCK_NUM - 1) {
-    // Writing buffer to "disk"
     uint8_t* addr = msc_disk[lba];
     memcpy(addr, buffer, bufsize);
   }
@@ -620,7 +722,6 @@ int32_t msc_write_callback(uint32_t lba, uint8_t* buffer, uint32_t bufsize) {
 // Callback invoked when WRITE10 command is completed (status received and accepted by host).
 // used to flush any pending cache.
 void msc_flush_callback(void) {
-  // Nothing to do
 }
 
 void scrollUp(uint8_t pixels) {
@@ -636,14 +737,12 @@ void scrollUp(uint8_t pixels) {
 
   // Clear the freed space after scrolling
   display.fillRect(0, display.height() - pixels, display.width(), pixels, SSD1306_BLACK);
-  // Refresh the display to show the changes
   display.display();
 }
 
 void checkAndScroll() {
   // Assumes text height of 8 pixels, but check for 16 because newline is not used
   if ((display.getCursorY() + 16) > display.height()) {
-    // Scroll up by 8 pixels
     scrollUp(8);
     display.setCursor(0, display.getCursorY() - 8);
   }
@@ -664,7 +763,6 @@ void printout(const char *str)
   display.print(str);
   display.display();
 
-  // Output on serial device
   SerialTinyUSB.println(str);
 }
 
@@ -766,7 +864,6 @@ void reinit_display() {
   draw(current_gui_message, current_logo_index);
 }
 
-// HexDump
 void hexDump(unsigned char* data, size_t size) {
   char asciitab[17];
   size_t i, j;
@@ -839,7 +936,6 @@ void tuh_umount_cb(uint8_t daddr)
   dev_info_t *dev = &dev_info[daddr - 1];
   dev->mounted = false;
 
-  // Reset suspicious device flags
   suspicious_device = false;
   suspicious_reported = false;
   suspicious_name[0] = '\0';
@@ -856,10 +952,8 @@ static void print_device_descriptor(tuh_xfer_t *xfer)
   dev_info_t *dev = &dev_info[daddr - 1];
   tusb_desc_device_t *desc = &dev->desc_device;
 
-  // Save device info for forensics
   save_device_info(dev, desc);
 
-  // Check if device is in suspicious list
   const char* suspicious_match = check_suspicious_device(desc->idVendor, desc->idProduct);
   if (suspicious_match != NULL) {
     suspicious_device = true;
@@ -868,7 +962,6 @@ static void print_device_descriptor(tuh_xfer_t *xfer)
     suspicious_name[sizeof(suspicious_name) - 1] = '\0';
     SerialTinyUSB.printf("\r\n[!!!] SUSPICIOUS DEVICE: %s\r\n", suspicious_match);
 
-    // Update forensics info
     last_device.was_suspicious = true;
     strncpy(last_device.suspicious_reason, suspicious_match, sizeof(last_device.suspicious_reason) - 1);
   }
@@ -996,13 +1089,12 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
   uint16_t vid, pid;
   const char* protocol_str[] = { "None", "Keyboard", "Mouse" };
 
-  // Read the HID protocol
   uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
   tuh_vid_pid_get(dev_addr, &vid, &pid);
 
   showStatus("HID Device", LOGO_ALERT_SYMBOL);
-  setNeoColor(255, 0, 0);       // Rojo
+  setNeoColor(255, 0, 0);
 
   SerialTinyUSB.printf("HID device address = %d, instance = %d mounted\r\n", dev_addr, instance);
   SerialTinyUSB.printf("VID = %04x, PID = %04x\r\n", vid, pid);
@@ -1017,7 +1109,6 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
 void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
   SerialTinyUSB.printf("HID device address = %d, instance = %d unmounted\r\n", dev_addr, instance);
 
-  // Reset HID sent flag
   hid_sent = false;
   hid_reported = false;
   hid_event_num = 0;
@@ -1032,7 +1123,6 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t cons
   // Used in main loop to write output to OLED
   hid_sent = true;
 
-  // Read the HID protocol
   uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
 
   switch (itf_protocol) {
@@ -1126,7 +1216,6 @@ static void process_kbd_report(hid_keyboard_report_t const* report) {
   }
   // (reports with no keycodes leave the counter unchanged)
 
-  // Debug: show raw modifier byte if enabled
   if (show_hid_debug && report->modifier != 0) {
     SerialTinyUSB.printf("[mod=0x%02X]", report->modifier);
   }
@@ -1139,12 +1228,10 @@ static void process_kbd_report(hid_keyboard_report_t const* report) {
         // Not existed in previous report means the current key is pressed
         uint8_t keycode = report->keycode[i];
 
-        // Debug: show raw keycode
         if (show_hid_debug) {
           SerialTinyUSB.printf("[key=0x%02X]", keycode);
         }
 
-        // Update HID speed tracking
         update_hid_speed();
         last_device.hid_events++;
 
@@ -1152,7 +1239,6 @@ static void process_kbd_report(hid_keyboard_report_t const* report) {
         bool const is_shift = (report->modifier & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT)) != 0;
         uint8_t ch = keycode2ascii[keycode][is_shift ? 1 : 0];
 
-        // Get the modifier byte
         uint8_t mod = report->modifier;
 
         // Mask out the modifier bit if this keycode IS a modifier key being pressed
@@ -1305,7 +1391,6 @@ static const char* get_special_key_marker(uint8_t code) {
 static void process_mouse_report(hid_mouse_report_t const* report) {
   static hid_mouse_report_t prev_report = { 0 };
 
-  //------------- button state  -------------//
   uint8_t button_changed_mask = report->buttons ^ prev_report.buttons;
   if (button_changed_mask & report->buttons) {
     SerialTinyUSB.printf("MOUSE: %c%c%c ",
@@ -1328,7 +1413,6 @@ void setNeoColor(uint8_t r, uint8_t g, uint8_t b) {
   statusPixel.show();
 }
 
-// END of BADUSB detector section
 
 //
 // OTHER Host devices detection section
@@ -1337,19 +1421,151 @@ void setNeoColor(uint8_t r, uint8_t g, uint8_t b) {
 // Invoked when a device with MassStorage interface is mounted
 void tuh_msc_mount_cb(uint8_t dev_addr) {
   showStatus("Mass Device", LOGO_USB_CONNECTED);
-  setNeoColor(0, 255, 0);  // Green
+  setNeoColor(0, 255, 0);
   SerialTinyUSB.printf("Mass Device attached, address = %d\r\n", dev_addr);
+
+  // Remember it so a "Bak" hold (or the WIPE serial command) can wipe its tables.
+  // We deliberately DO NOT wipe automatically on mount: the user must ask for it.
+  msc_dev_addr        = dev_addr;
+  msc_mounted         = true;
+  wipe.is_wiping      = false;
+  wipe_in_progress    = false;
+  wipe_requested      = false;
+  wipe_done           = false;
+  wipe_error          = false;
+  wipe_done_reported  = false;
+  wipe_error_reported = false;
 }
 
 // Invoked when a device with MassStorage interface is unmounted
 void tuh_msc_umount_cb(uint8_t dev_addr) {
   SerialTinyUSB.printf("Mass Device unmounted, address = %d\r\n", dev_addr);
+  if (dev_addr == msc_dev_addr) {
+    msc_mounted      = false;
+    wipe.is_wiping   = false;
+    wipe_in_progress = false;
+    wipe_requested   = false;
+  }
+}
+
+//
+// Partition-table wiper (runs entirely on core1 / host stack)
+//
+
+// Picks up a wipe request from core0 and kicks off the write chain.
+void service_wipe() {
+  if (!wipe_requested) {
+    return;
+  }
+  wipe_requested = false;
+
+  if (wipe.is_wiping) {
+    return;  // Already running
+  }
+  if (!msc_mounted || !tuh_msc_mounted(msc_dev_addr)) {
+    SerialTinyUSB.println("[WIPE] Aborted: no mass-storage device mounted");
+    return;
+  }
+
+  // Our zero buffer is WIPE_BLOCK_SIZE bytes; refuse anything else to stay safe
+  uint32_t bsize = tuh_msc_get_block_size(msc_dev_addr, 0);
+  if (bsize != WIPE_BLOCK_SIZE) {
+    SerialTinyUSB.printf("[WIPE] Unsupported block size %lu, aborting\r\n", (unsigned long)bsize);
+    wipe_error = true;
+    return;
+  }
+
+  memset(wipe.buffer, 0, sizeof(wipe.buffer));
+  wipe.dev_addr    = msc_dev_addr;
+  wipe.block_count = tuh_msc_get_block_count(msc_dev_addr, 0);
+  wipe.current_lba = 0;
+  wipe.phase       = 0;
+  wipe.is_wiping   = true;
+  wipe_in_progress = true;
+  wipe_done        = false;
+  wipe_error       = false;
+
+  SerialTinyUSB.printf("[WIPE] Starting on addr %u (%lu blocks)\r\n",
+                       wipe.dev_addr, (unsigned long)wipe.block_count);
+  start_wipe_process(wipe.dev_addr);
+}
+
+void start_wipe_process(uint8_t dev_addr) {
+  (void)dev_addr;
+  SerialTinyUSB.printf("[WIPE] Zeroing LBA 0..%d\r\n", WIPE_LIMIT_LBA);
+  process_next_block();
+}
+
+// Issues a single-block zero write; the completion callback chains the next one.
+void process_next_block() {
+  if (!tuh_msc_mounted(wipe.dev_addr)) {
+    SerialTinyUSB.println("[WIPE] Device vanished mid-wipe");
+    wipe.is_wiping   = false;
+    wipe_in_progress = false;
+    wipe_error       = true;
+    return;
+  }
+
+  bool ok = tuh_msc_write10(wipe.dev_addr, 0, wipe.buffer,
+                            wipe.current_lba, 1, wipe_write_complete_cb, 0);
+  if (!ok) {
+    SerialTinyUSB.printf("[WIPE] write10 failed at LBA %lu\r\n", (unsigned long)wipe.current_lba);
+    wipe.is_wiping   = false;
+    wipe_in_progress = false;
+    wipe_error       = true;
+  }
+}
+
+// Invoked by the host stack when a WRITE10 completes. Advances the state machine:
+// phase 0 zeroes the head of the disk, then jumps to zero the tail (GPT backup).
+bool wipe_write_complete_cb(uint8_t dev_addr, tuh_msc_complete_data_t const* cb_data) {
+  (void)dev_addr;
+
+  if (cb_data->csw->status != 0) {
+    SerialTinyUSB.printf("[WIPE] Write error at LBA %lu (status %d)\r\n",
+                         (unsigned long)wipe.current_lba, cb_data->csw->status);
+    wipe.is_wiping   = false;
+    wipe_in_progress = false;
+    wipe_error       = true;
+    return true;
+  }
+
+  wipe.current_lba++;
+
+  if (wipe.phase == 0) {
+    if (wipe.current_lba >= WIPE_LIMIT_LBA) {
+      if (wipe.block_count > (uint32_t)WIPE_LIMIT_LBA * 2) {
+        // Jump to the tail to erase the GPT backup header + partition array
+        wipe.phase       = 1;
+        wipe.current_lba = wipe.block_count - WIPE_LIMIT_LBA;
+        process_next_block();
+      } else {
+        wipe.is_wiping   = false;
+        wipe_in_progress = false;
+        wipe_done        = true;
+        SerialTinyUSB.printf("[WIPE] Done, wiped %d blocks\r\n", WIPE_LIMIT_LBA);
+      }
+    } else {
+      process_next_block();
+    }
+  } else {  // phase 1: tail of the disk
+    if (wipe.current_lba >= wipe.block_count) {
+      wipe.is_wiping   = false;
+      wipe_in_progress = false;
+      wipe_done        = true;
+      SerialTinyUSB.printf("[WIPE] Done, wiped first and last %d blocks\r\n", WIPE_LIMIT_LBA);
+    } else {
+      process_next_block();
+    }
+  }
+
+  return true;
 }
 
 // Invoked when a device with CDC (Communication Device Class) interface is mounted
 void tuh_cdc_mount_cb(uint8_t idx) {
   showStatus("CDC Device", LOGO_USB_CONNECTED);
-  setNeoColor(0, 255, 0);  // Green
+  setNeoColor(0, 255, 0);
   SerialTinyUSB.printf("CDC Device attached, idx = %d\r\n", idx);
 }
 
@@ -1358,13 +1574,11 @@ void tuh_cdc_umount_cb(uint8_t idx) {
   SerialTinyUSB.printf("CDC Device unmounted, idx = %d\r\n", idx);
 }
 
-// END of OTHER Host devices detector section
 
 //
 // Serial Command Processing
 //
 void process_serial_command(const char* cmd) {
-  // Convert to uppercase for comparison
   char upper[SERIAL_BUFFER_SIZE];
   for (int i = 0; cmd[i] && i < SERIAL_BUFFER_SIZE - 1; i++) {
     upper[i] = toupper(cmd[i]);
@@ -1382,6 +1596,7 @@ void process_serial_command(const char* cmd) {
     SerialTinyUSB.println("HEXDUMP  - Toggle hexdump output");
     SerialTinyUSB.println("HIDDEBUG - Toggle HID raw debug");
     SerialTinyUSB.println("CLEAR    - Clear last device info");
+    SerialTinyUSB.println("WIPE     - Destroy partition tables of mounted USB");
     SerialTinyUSB.println("=========================\r\n");
   }
   else if (strcmp(upper, "STATUS") == 0) {
@@ -1427,6 +1642,22 @@ void process_serial_command(const char* cmd) {
   else if (strcmp(upper, "CLEAR") == 0) {
     memset(&last_device, 0, sizeof(last_device));
     SerialTinyUSB.println("[+] Last device info cleared");
+  }
+  else if (strcmp(upper, "WIPE") == 0) {
+    if (!msc_mounted) {
+      SerialTinyUSB.println("[!] No mass-storage device mounted");
+    } else if (wipe_in_progress) {
+      SerialTinyUSB.println("[!] Wipe already in progress");
+    } else {
+      SerialTinyUSB.println("[+] Wipe requested: destroying partition tables");
+      wipe_done = false;
+      wipe_error = false;
+      wipe_done_reported = false;
+      wipe_error_reported = false;
+      wipe_requested = true;
+      showStatus("WIPING DISK", LOGO_ALERT_SYMBOL);
+      setNeoColor(255, 165, 0);
+    }
   }
   else if (strlen(upper) > 0) {
     SerialTinyUSB.printf("[!] Unknown command: %s (type HELP)\r\n", cmd);
@@ -1492,13 +1723,10 @@ void save_device_info(dev_info_t* dev, tusb_desc_device_t* desc) {
 void update_hid_speed() {
   uint32_t now = to_ms_since_boot(get_absolute_time());
 
-  // Reset window if expired
   if (now - hid_window_start > HID_SPEED_WINDOW_MS) {
-    // Calculate speed from last window
     if (hid_window_count > 0) {
       hid_current_speed = (float)hid_window_count * 1000.0f / (float)HID_SPEED_WINDOW_MS;
 
-      // Check for automated typing
       if (hid_current_speed > HID_SPEED_THRESHOLD && !hid_speed_alert) {
         hid_speed_alert = true;
         hid_speed_reported = false;

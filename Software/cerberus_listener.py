@@ -61,7 +61,6 @@ COLORS = {
     "redteam_dim": "#aa3333",
 }
 
-# Alert patterns
 ALERT_PATTERNS = [
     (r"\[!!!\].*AUTO", "danger"),   # Automated typing
     (r"\[!!!\].*", "danger"),
@@ -77,7 +76,6 @@ ALERT_PATTERNS = [
     (r"SUSPICIOUS", "danger"),
 ]
 
-# Attack patterns
 ATTACK_PATTERNS = [
     (r"GUI\+.*r", "WIN+R (Run)", "danger"),
     (r"GUI\+.*x", "WIN+X (Power)", "warning"),
@@ -161,14 +159,12 @@ class PayloadAnalyzer:
 
     def add_event(self, modifiers, key):
         """Add a keystroke event with optional modifiers."""
-        # Validate key
         if not key or (len(key) == 1 and not key.isprintable() and key not in '\r\n\t'):
             return
 
         now = time.time()
         self.keystroke_times.append(now)
 
-        # Normalize modifiers to a set
         mods = set()
         if modifiers:
             mod_str = modifiers.upper()
@@ -176,16 +172,13 @@ class PayloadAnalyzer:
             if "GUI" in mod_str: mods.add("GUI")
             if "ALT" in mod_str: mods.add("ALT")
 
-        # Clean up key value
         key = key.strip()
         if not key:
             return
 
-        # Determine if it's a special key
         is_special = key.startswith("<") and key.endswith(">")
         special_name = key[1:-1].upper() if is_special else None
 
-        # Store event
         self.raw_events.append({
             "mods": mods,
             "key": key,
@@ -202,7 +195,6 @@ class PayloadAnalyzer:
         else:
             self.keystroke_buffer += key
 
-        # Limit buffer size
         if len(self.keystroke_buffer) > 1000:
             self.keystroke_buffer = self.keystroke_buffer[-1000:]
 
@@ -348,7 +340,6 @@ class PayloadAnalyzer:
                 mods_part = mod_match.group(1).upper()  # e.g., "CTRL+GUI+"
                 key = mod_match.group(2)               # e.g., "r" or "<ENTER>"
 
-                # Build normalized modifier string
                 mods_list = []
                 if "CTRL+" in mods_part: mods_list.append("CTRL")
                 if "GUI+" in mods_part: mods_list.append("GUI")
@@ -383,11 +374,9 @@ class PayloadAnalyzer:
         if not text:
             return
 
-        # Filter out non-keystroke lines
         if not self.is_keystroke_line(text):
             return
 
-        # Parse the keystroke line
         events = self.parse_keystroke_line(text)
         for mods, key in events:
             if key and key.strip():
@@ -466,7 +455,6 @@ class CerberusApp(tk.Tk):
         self.minsize(900, 550)
         self.configure(bg=COLORS["bg_dark"])
 
-        # State
         self.serial = None
         self.stop_event = threading.Event()
         self.reader_thread = None
@@ -508,7 +496,6 @@ class CerberusApp(tk.Tk):
         tk.Label(left, text="  USB Watchdog", font=("Segoe UI", 9),
                  bg=COLORS["bg_panel"], fg=COLORS["fg_dim"]).pack(side="left")
 
-        # Red Team mode toggle
         self.redteam_btn = tk.Checkbutton(
             left, text="RED TEAM", variable=self.redteam_mode,
             font=("Segoe UI", 9, "bold"), bg=COLORS["bg_panel"],
@@ -561,11 +548,9 @@ class CerberusApp(tk.Tk):
         self.main_container = tk.Frame(self, bg=COLORS["bg_dark"])
         self.main_container.pack(fill="both", expand=True, padx=15, pady=(0, 10))
 
-        # Normal mode layout
         self.normal_frame = tk.Frame(self.main_container, bg=COLORS["bg_dark"])
         self._build_normal_view(self.normal_frame)
 
-        # Red Team mode layout
         self.redteam_frame = tk.Frame(self.main_container, bg=COLORS["bg_redteam"])
         self._build_redteam_view(self.redteam_frame)
 
@@ -575,7 +560,6 @@ class CerberusApp(tk.Tk):
         paned = tk.PanedWindow(parent, orient="horizontal", bg=COLORS["border"], sashwidth=4)
         paned.pack(fill="both", expand=True)
 
-        # Log
         log_c = tk.Frame(paned, bg=COLORS["border"])
         log_i = tk.Frame(log_c, bg=COLORS["bg_input"])
         log_i.pack(fill="both", expand=True, padx=1, pady=1)
@@ -589,23 +573,19 @@ class CerberusApp(tk.Tk):
         self.log_text.pack(side="left", fill="both", expand=True)
         paned.add(log_c, minsize=400, stretch="always")
 
-        # Status panel (simplified)
         pay_c = tk.Frame(paned, bg=COLORS["border"])
         pay_i = tk.Frame(pay_c, bg=COLORS["bg_panel"])
         pay_i.pack(fill="both", expand=True, padx=1, pady=1)
 
-        # Header
         ph = tk.Frame(pay_i, bg=COLORS["bg_panel"])
         ph.pack(fill="x", padx=10, pady=(10, 5))
         tk.Label(ph, text="HID Monitor", font=("Segoe UI", 10, "bold"),
                  bg=COLORS["bg_panel"], fg=COLORS["fg_normal"]).pack(side="left")
         ModernButton(ph, text="Reset", command=self._reset_analyzer, style="secondary").pack(side="right")
 
-        # Status cards
         status_frame = tk.Frame(pay_i, bg=COLORS["bg_panel"])
         status_frame.pack(fill="x", padx=10, pady=10)
 
-        # Speed card
         speed_card = tk.Frame(status_frame, bg=COLORS["bg_input"], padx=12, pady=8)
         speed_card.pack(fill="x", pady=2)
         tk.Label(speed_card, text="Typing Speed", font=("Segoe UI", 8),
@@ -617,7 +597,6 @@ class CerberusApp(tk.Tk):
                                         bg=COLORS["bg_input"], fg=COLORS["danger"])
         self.auto_indicator.pack(anchor="w")
 
-        # Events card
         events_card = tk.Frame(status_frame, bg=COLORS["bg_input"], padx=12, pady=8)
         events_card.pack(fill="x", pady=2)
         tk.Label(events_card, text="HID Events", font=("Segoe UI", 8),
@@ -626,7 +605,6 @@ class CerberusApp(tk.Tk):
                                       bg=COLORS["bg_input"], fg=COLORS["accent"])
         self.events_label.pack(anchor="w")
 
-        # Alerts card
         alerts_card = tk.Frame(status_frame, bg=COLORS["bg_input"], padx=12, pady=8)
         alerts_card.pack(fill="x", pady=2)
         tk.Label(alerts_card, text="Alerts", font=("Segoe UI", 8),
@@ -659,7 +637,6 @@ class CerberusApp(tk.Tk):
         paned = tk.PanedWindow(parent, orient="horizontal", bg=COLORS["redteam_dim"], sashwidth=4)
         paned.pack(fill="both", expand=True)
 
-        # Left: Log with command input
         left = tk.Frame(paned, bg=COLORS["redteam_dim"])
         left_i = tk.Frame(left, bg=COLORS["bg_input"])
         left_i.pack(fill="both", expand=True, padx=1, pady=1)
@@ -672,7 +649,6 @@ class CerberusApp(tk.Tk):
         scroll.pack(side="right", fill="y")
         self.rt_log.pack(side="left", fill="both", expand=True)
 
-        # Command input
         cmd_frame = tk.Frame(left, bg=COLORS["bg_redteam"])
         cmd_frame.pack(fill="x", pady=5)
 
@@ -689,18 +665,15 @@ class CerberusApp(tk.Tk):
 
         paned.add(left, minsize=450, stretch="always")
 
-        # Right: DuckyScript export & tools
         right = tk.Frame(paned, bg=COLORS["redteam_dim"])
         right_i = tk.Frame(right, bg=COLORS["bg_redteam"])
         right_i.pack(fill="both", expand=True, padx=1, pady=1)
 
-        # Header
         rh = tk.Frame(right_i, bg=COLORS["bg_redteam"])
         rh.pack(fill="x", padx=10, pady=10)
         tk.Label(rh, text="RED TEAM TOOLS", font=("Segoe UI", 11, "bold"),
                  bg=COLORS["bg_redteam"], fg=COLORS["redteam"]).pack(side="left")
 
-        # Quick commands
         qc = tk.LabelFrame(right_i, text="Quick Commands", font=("Segoe UI", 9),
                            bg=COLORS["bg_redteam"], fg=COLORS["fg_dim"])
         qc.pack(fill="x", padx=10, pady=5)
@@ -716,7 +689,6 @@ class CerberusApp(tk.Tk):
         qc.grid_columnconfigure(1, weight=1)
         qc.grid_columnconfigure(2, weight=1)
 
-        # Device Descriptor panel
         desc_header = tk.Frame(right_i, bg=COLORS["bg_redteam"])
         desc_header.pack(fill="x", padx=10, pady=(10, 5))
         tk.Label(desc_header, text="DEVICE DESCRIPTOR", font=("Segoe UI", 10, "bold"),
@@ -724,7 +696,6 @@ class CerberusApp(tk.Tk):
         ModernButton(desc_header, text="Clear", command=self._clear_device_info,
                      style="secondary").pack(side="right")
 
-        # Info grid
         info_frame = tk.Frame(right_i, bg=COLORS["bg_input"], padx=10, pady=8)
         info_frame.pack(fill="x", padx=10, pady=(0, 5))
 
@@ -763,7 +734,6 @@ class CerberusApp(tk.Tk):
         info_frame.grid_columnconfigure(1, weight=1)
         info_frame.grid_columnconfigure(3, weight=1)
 
-        # Raw descriptor output
         tk.Label(right_i, text="Raw Descriptor:", font=("Segoe UI", 9),
                  bg=COLORS["bg_redteam"], fg=COLORS["fg_dim"]).pack(anchor="w", padx=10, pady=(5, 2))
 
@@ -979,7 +949,6 @@ class CerberusApp(tk.Tk):
         if val:
             self.device_info['num_configs'] = val; updated = True
 
-        # Append to raw descriptor text widget
         self.raw_descriptor_lines.append(line)
         if hasattr(self, 'desc_raw'):
             self.desc_raw.configure(state="normal")
@@ -1039,11 +1008,9 @@ class CerberusApp(tk.Tk):
         self.alerts_label.config(text="0", fg=COLORS["success"])
 
     def _update_payload_display(self):
-        # Update events count
         events = len(self.analyzer.raw_events)
         self.events_label.config(text=str(events))
 
-        # Update speed
         speed = self.analyzer.get_typing_speed()
         self.speed_label.config(text=f"{speed:.1f} k/s")
 
@@ -1057,7 +1024,6 @@ class CerberusApp(tk.Tk):
             self.speed_label.config(fg=COLORS["fg_normal"])
             self.auto_indicator.config(text="")
 
-        # Update alerts count
         alerts = len(self.analyzer.detected_patterns)
         self.alerts_label.config(text=str(alerts))
         if alerts > 0:
@@ -1103,7 +1069,6 @@ class CerberusApp(tk.Tk):
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
-        # Also log to RT console if in redteam mode
         if self.redteam_mode.get():
             self._log_rt(msg, color)
 

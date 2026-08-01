@@ -34,6 +34,7 @@ En lugar de confiar a ciegas en una memoria que encontraste o que te prestaron, 
 - **Base de datos de dispositivos sospechosos** — reconoce hardware de ataque conocido por su VID/PID.
 - **Visibilidad total** — pantalla OLED, LED NeoPixel y consola serie con todo lo que ocurre.
 - **Forense y red team** — captura keystrokes, exporta a DuckyScript y guarda info del último dispositivo.
+- **Neutraliza unidades sospechosas** — borra manualmente las tablas MBR/GPT del USB montado (mantén "Bak" ~3 s o el comando `WIPE`); nunca de forma automática.
 
 > Pensado para profesionales de ciberseguridad (SOC, blue team y red team) como banco de pruebas USB, depuración de payloads BadUSB y triaje forense básico. Construido sobre [USBvalve](https://github.com/cecio/USBvalve).
 
@@ -112,10 +113,14 @@ La idea es simple: **Cerberus se conecta entre tu computadora y el USB que quier
 | Tecleo automatizado (BadUSB)  | "AUTO [X] k/s"     | Magenta   |
 | USB Killer detectado          | "USB Killer"       | Rojo      |
 | Dispositivo de almacenamiento | "Mass Device"      | Verde     |
+| Cuenta atrás de borrado       | "Hold: WIPE Ns"    | —         |
+| Borrado en progreso           | "WIPING DISK"      | —         |
+| Borrado completado            | "WIPE DONE"        | —         |
+| Error de borrado              | "WIPE ERROR"       | —         |
 
 ### Botones físicos
 
-- **BTN_RST**: Navega por las páginas de descriptores USB del dispositivo conectado
+- **BTN_RST** ("Bak"): Pulsación corta navega por las páginas de descriptores USB; mantenerlo ~3 s con un almacenamiento montado neutraliza sus tablas MBR/GPT (borrado)
 - **BTN_OK**: Sale de la vista de descriptores / refresca la pantalla
 - **BOOTSEL**:
   - Pulsación corta: Reinicia el dispositivo
@@ -136,6 +141,7 @@ Conecta vía serial (SerialTinyUSB) y escribe estos comandos:
 | `HEXDUMP`  | Activa/desactiva volcado hexadecimal          |
 | `HIDDEBUG` | Activa/desactiva debug HID (bytes crudos)     |
 | `CLEAR`    | Borra info del último dispositivo             |
+| `WIPE`     | Neutraliza las tablas MBR/GPT del USB montado |
 
 ---
 
@@ -222,6 +228,7 @@ Este proyecto no solo es un repositorio: es un espacio abierto para aprender, ex
 
 - Proyecto basado en [USBvalve](https://github.com/cecio/USBvalve) hecho por _[Cecio](https://github.com/cecio)_
 - Proteccion Galvanica basada en [USB Isolator ](https://github.com/wagiminator/ADuM3160-USB-Isolator) hecho por _[wagiminator](https://github.com/wagiminator)_
+- Neutralizador de particiones (borrado de tablas MBR/GPT) portado desde [USB-Neutralizer](https://github.com/novamostra/USB-Neutralizer) hecho por _[novamostra](https://github.com/novamostra)_
 - Modificado / Creado por:
   - [Erik Alcantara](https://www.linkedin.com/in/erik-alc%C3%A1ntara-covarrubias-29a97628a/)
 
