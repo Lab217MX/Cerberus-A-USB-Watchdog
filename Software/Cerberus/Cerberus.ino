@@ -20,6 +20,10 @@
 *********************************************************************/
 
 #include <pio_usb.h>
+// SdFat (Adafruit Fork) MUST be included before Adafruit_TinyUSB.h: this is what
+// makes arduino-cli link SdFat and makes TinyUSB expose its host MSC block device
+// (Adafruit_USBH_MSC_BlockDevice), used by the USB content explorer (usb_explorer.ino).
+#include "SdFat_Adafruit_Fork.h"
 #include "Adafruit_TinyUSB.h"
 #include <XxHash_arduino.h>
 #include <pico/stdlib.h>
@@ -37,7 +41,7 @@
 extern "C" {
   #include "tusb.h"
 }
-
+                            
 //
 // BADUSB detector section
 //
@@ -229,6 +233,23 @@ void start_wipe_process(uint8_t dev_addr);
 void process_next_block();
 bool wipe_write_complete_cb(uint8_t dev_addr, tuh_msc_complete_data_t const* cb_data);
 void service_wipe();
+
+//
+// USB content explorer (implemented in usb_explorer.ino)
+//
+// Lets you inspect the files on a mass-storage device plugged into the HOST
+// port BEFORE it ever reaches the real PC: mount its FAT/exFAT filesystem
+// read-only, list directories and preview file contents (text/hex), either
+// over serial (LS/CAT) or on the OLED (hold OK while a drive is mounted).
+//
+void explorer_mount(uint8_t dev_addr);    // called from tuh_msc_mount_cb   (core1)
+void explorer_umount(uint8_t dev_addr);   // called from tuh_msc_umount_cb  (core1)
+void mscService();                        // called from loop1()            (core1)
+void explorer_ls(const char* path);       // serial LS command              (core0)
+void explorer_cat(const char* path);      // serial CAT command             (core0)
+void explorer_oled_browse();              // modal OLED file browser         (core0)
+extern volatile bool g_mscMounted;        // FAT/exFAT volume mounted & usable
+extern volatile bool g_mscPresent;        // a disk is attached (mountable or not)
 
 //
 // Anti-Detection settings.
@@ -519,19 +540,48 @@ void loop() {
     }
   }
 
-  static bool ok_prev = true;
+  //
+  // "OK" button (BTN_OK):
+  //   - short press -> exit descriptor view / refresh the display (original behaviour)
+  //   - hold >= OK_HOLD_MS while a mass-storage device is attached -> open the
+  //     OLED file browser so the USB can be inspected before trusting it.
+  //
+  // The short-press action is deferred to release so a hold isn't also treated
+  // as a short press.
+  #define OK_HOLD_MS 1000
+  static bool     ok_prev = true;
+  static uint32_t ok_press_start = 0;
+  static bool     ok_hold_fired = false;
   bool ok_now = digitalRead(BTN_OK);
   if (ok_now != ok_prev) {
     ok_prev = ok_now;
     if (ok_now == LOW) {
-      if (descriptor_view_active) {
-        SerialTinyUSB.println("BTN_OK pressed -> exit descriptor view");
-        exit_descriptor_view();
-      } else {
-        // Force a redraw of the main screen if it was cleared unexpectedly
-        SerialTinyUSB.println("BTN_OK pressed -> refresh display");
-        reinit_display();
+      ok_press_start = to_ms_since_boot(get_absolute_time());
+      ok_hold_fired = false;
+    } else {
+      // Released: run the short-press action only if a hold didn't already fire
+      if (!ok_hold_fired) {
+        if (descriptor_view_active) {
+          SerialTinyUSB.println("BTN_OK pressed -> exit descriptor view");
+          exit_descriptor_view();
+        } else {
+          SerialTinyUSB.println("BTN_OK pressed -> refresh display");
+          reinit_display();
+        }
       }
+      ok_press_start = 0;
+    }
+  }
+
+  // Sustained OK hold -> launch the file browser (only when a drive is attached)
+  if (ok_now == LOW && ok_press_start != 0 && !ok_hold_fired && msc_mounted) {
+    uint32_t held = to_ms_since_boot(get_absolute_time()) - ok_press_start;
+    if (held >= OK_HOLD_MS) {
+      ok_hold_fired = true;
+      descriptor_view_active = false;
+      descriptor_page = 0;
+      explorer_oled_browse();          // blocks until the user backs out
+      draw(current_gui_message, current_logo_index);
     }
   }
 
@@ -638,6 +688,7 @@ void loop() {
 void loop1() {
   USBHost.task();
   service_wipe();  // Starts a wipe on the host core when core0 requested one
+  mscService();    // Serves file-explorer requests (list/read) issued by core0
 }
 
 // Callback invoked when received READ10 command.
@@ -1435,6 +1486,11 @@ void tuh_msc_mount_cb(uint8_t dev_addr) {
   wipe_error          = false;
   wipe_done_reported  = false;
   wipe_error_reported = false;
+
+  // Mount its filesystem (read-only) so its contents can be inspected before
+  // the drive is trusted on the real PC. Safe to do the blocking sync reads
+  // here: this callback already runs on core1 inside USBHost.task().
+  explorer_mount(dev_addr);
 }
 
 // Invoked when a device with MassStorage interface is unmounted
@@ -1446,6 +1502,7 @@ void tuh_msc_umount_cb(uint8_t dev_addr) {
     wipe_in_progress = false;
     wipe_requested   = false;
   }
+  explorer_umount(dev_addr);
 }
 
 //
@@ -1585,6 +1642,41 @@ void process_serial_command(const char* cmd) {
     upper[i + 1] = '\0';
   }
 
+  // Commands that take an argument (a filesystem path) need the argument in its
+  // ORIGINAL case, so we can't use the fully-uppercased buffer for them. Split
+  // off the first word as the (case-insensitive) keyword and keep a pointer to
+  // the original-case remainder as the argument.
+  char keyword[16] = {0};
+  const char* arg = cmd;
+  while (*arg == ' ') arg++;
+  {
+    int k = 0;
+    while (arg[k] && arg[k] != ' ' && k < (int)sizeof(keyword) - 1) {
+      keyword[k] = toupper(arg[k]);
+      k++;
+    }
+    keyword[k] = '\0';
+    arg += k;
+    while (*arg == ' ') arg++;   // arg now points at the (possibly empty) argument
+  }
+
+  if (strcmp(keyword, "LS") == 0 || strcmp(keyword, "DIR") == 0) {
+    explorer_ls(arg[0] ? arg : "/");
+    return;
+  }
+  else if (strcmp(keyword, "CAT") == 0 || strcmp(keyword, "TYPE") == 0) {
+    if (!arg[0]) {
+      SerialTinyUSB.println("[!] Usage: CAT <path>");
+    } else {
+      explorer_cat(arg);
+    }
+    return;
+  }
+  else if (strcmp(keyword, "BROWSE") == 0) {
+    explorer_oled_browse();
+    return;
+  }
+
   if (strcmp(upper, "HELP") == 0 || strcmp(upper, "?") == 0) {
     SerialTinyUSB.println("\r\n=== CERBERUS COMMANDS ===");
     SerialTinyUSB.println("HELP     - Show this help");
@@ -1597,6 +1689,9 @@ void process_serial_command(const char* cmd) {
     SerialTinyUSB.println("HIDDEBUG - Toggle HID raw debug");
     SerialTinyUSB.println("CLEAR    - Clear last device info");
     SerialTinyUSB.println("WIPE     - Destroy partition tables of mounted USB");
+    SerialTinyUSB.println("LS [path]- List a directory on the mounted USB");
+    SerialTinyUSB.println("CAT path - Preview a file (text + hex) on the USB");
+    SerialTinyUSB.println("BROWSE   - Open the file browser on the OLED");
     SerialTinyUSB.println("=========================\r\n");
   }
   else if (strcmp(upper, "STATUS") == 0) {
