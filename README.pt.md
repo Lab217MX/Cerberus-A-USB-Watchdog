@@ -14,7 +14,8 @@
 </p>
 
 ![Status](https://img.shields.io/badge/status-Em_desenvolvimento-green)
-![License](https://img.shields.io/badge/license-GNU_AGPLv3-blue)
+![License](https://img.shields.io/badge/license-MIT-blue)
+[![OSHWA Certified](https://img.shields.io/badge/OSHWA-MX000041-brightgreen)](https://certification.oshwa.org/mx000041.html)
 
 **🌐 [English](README.md) · [Español](README.es.md) · [Português](README.pt.md)**
 
@@ -247,3 +248,27 @@ Este projeto não é apenas um repositório: é um espaço aberto para aprender,
 </p>
 
 Agradecemos à **PCBWay** por patrocinar este projeto. Seu serviço de fabricação de PCBs de alta qualidade nos permitiu levar o Cerberus do protótipo à realidade. Se você procura fabricar suas próprias PCBs com excelente qualidade, preços competitivos e envio rápido, recomendamos visitar a [PCBWay](https://www.pcbway.com/).
+
+---
+
+## Hardware de Código Aberto
+
+<p align="center">
+  <a href="https://certification.oshwa.org/mx000041.html">
+    <img src="https://img.shields.io/badge/OSHWA_Certified-MX000041-brightgreen?logo=opensourcehardware&logoColor=white" alt="OSHWA Certified MX000041">
+  </a>
+</p>
+
+O Cerberus é **hardware de código aberto certificado** pela [Open Source Hardware Association (OSHWA)](https://www.oshwa.org/).
+
+- **UID de certificação:** [MX000041](https://certification.oshwa.org/mx000041.html)
+- **País:** México 🇲🇽
+- **Hardware · Software · Documentação:** MIT
+
+---
+
+## Licença
+
+Este projeto está licenciado sob a **Licença MIT** — consulte o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+O hardware, o software e a documentação são publicados sob MIT, de acordo com as licenças declaradas na [certificação OSHWA (MX000041)](https://certification.oshwa.org/mx000041.html) do projeto.
