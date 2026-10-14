@@ -1,0 +1,4 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "ProPrj_Cerberus_2026-09-25-import-fps") (type "KiCad") (uri "${KIPRJMOD}/ProPrj_Cerberus_2026-09-25-import-fps.pretty") (options "kicad_import_cache=1") (descr ""))
+)

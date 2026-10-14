@@ -10,9 +10,13 @@ Firmware y herramientas de software para el proyecto Cerberus.
 Software/
 ├── Cerberus/
 │   ├── Cerberus.ino    # Firmware principal
+│   ├── usb_explorer.ino # Lector read-only multi-FS + analizador de archivos
+│   ├── GUI_Base.h      # Librería de pantallas OLED (todas las vistas)
+│   ├── MultiFs.h       # Interfaz común de los lectores de filesystem
+│   ├── fs_ntfs.h / fs_ext.h / fs_iso.h # Drivers NTFS / ext / ISO9660 (read-only)
+│   ├── Petme8x8.h / Picopixel.h # Fuentes GFX usadas por la GUI
 │   ├── ramdisk.h       # Imagen FAT del RAM Disk virtual
 │   └── resources.h     # Iconos y recursos gráficos para OLED
-├── cerberus_listener.py # Aplicación companion (GUI)
 └── README.md
 ```
 
@@ -25,10 +29,11 @@ Software/
 Firmware principal que implementa:
 
 - **Emulación MSC**: Disco RAM virtual que detecta lecturas de README/AUTORUN y escrituras sospechosas
-- **Neutralizador de particiones**: Borrado manual de las tablas MBR/GPT del USB montado en el puerto host (portado desde [USB-Neutralizer](https://github.com/novamostra/USB-Neutralizer)). Se dispara manteniendo pulsado el botón "Bak" ~3 s o con el comando serial `WIPE`; nunca de forma automática al montar
+- **Neutralizador de particiones**: Borrado manual de las tablas MBR/GPT del USB montado en el puerto host (portado desde [USB-Neutralizer](https://github.com/novamostra/USB-Neutralizer)). Se dispara desde el menú **Wipe** en pantalla o con el comando serial `WIPE`; nunca de forma automática al montar
 - **Host USB (PIO-USB)**: Monitoreo de dispositivos HID, Mass Storage y CDC
 - **Detección de amenazas**: USB Killer, dispositivos sospechosos (base de datos VID/PID), tecleo automatizado (BadUSB)
-- **Interfaz OLED**: GUI con iconos, estados y vista de descriptores USB
+- **Analizador de archivos**: Lectura read-only multi-FS (FAT/exFAT/NTFS/ext/ISO9660) que lista recursivamente los archivos, los tipifica por magic bytes, revisa dentro de archivos ZIP y detecta firmas/payloads anexados (polyglots). En pantalla (menú **Files**) y por serial (`SCAN` / `INSPECT`)
+- **Interfaz OLED**: Librería de pantallas `GUI_Base.h` (home, detección, menú, descriptores, analizador, hex, wipe); se dibuja solo desde Core 0
 - **LED NeoPixel**: Indicador visual de estado por colores
 - **Comandos serial**: Interface de texto para debugging y forense
 
@@ -48,10 +53,10 @@ Recursos gráficos (bitmaps) para la pantalla OLED: iconos de estado, alertas y 
 | ------ | ------------ | --------------------------------------------------------- |
 | GPIO0  | USB Host D+  | PIO-USB (HOST_PIN_DP)                                     |
 | GPIO1  | USB Host D-  | PIO-USB (D+ + 1)                                          |
-| GPIO3  | BTN_RST      | "Bak": corto = navegar descriptores; mantener ~3 s con USB montado = borrar tablas MBR/GPT (INPUT_PULLUP) |
+| GPIO3  | BTN_RST      | "Bak": retroceder / salir de menús (INPUT_PULLUP)         |
 | GPIO4  | I2C SDA      | Pantalla OLED SSD1306                                     |
 | GPIO5  | I2C SCL      | Pantalla OLED SSD1306                                     |
-| GPIO6  | BTN_OK       | Botón para salir de vista descriptores (INPUT_PULLUP)     |
+| GPIO6  | BTN_OK       | "Ok": abrir menú / seleccionar (INPUT_PULLUP)             |
 | GPIO8  | KILLER_PIN   | Detección USB Killer (INPUT_PULLUP, interrupción FALLING) |
 | GPIO16 | NEOPIXEL_PIN | LED RGB de estado (WS2812)                                |
 
@@ -74,33 +79,9 @@ Recursos gráficos (bitmaps) para la pantalla OLED: iconos de estado, alertas y 
 
 ---
 
-## Companion App (cerberus_listener.py)
+## Companion App (cerberus_listener.py) — descontinuada
 
-![Preview de la app](companionapp.png)
-Aplicación GUI en Python/Tkinter para monitoreo en tiempo real desde PC.
-
-### Características
-
-- **Conexión serial**: Auto-detección del dispositivo, reconexión automática
-- **Log con filtros**: Colores por severidad, búsqueda, filtrado por categoría
-- **Analizador de payloads**: Detecta patrones de ataque (GUI+R, powershell, etc.)
-- **Modo Red Team**: Exportación de keystrokes a DuckyScript
-
-### Requisitos
-
-```bash
-pip install pyserial
-```
-
-> `tkinter` viene incluido en instalaciones estándar de Python
-
-### Uso
-
-```bash
-python Software/cerberus_listener.py
-```
-
-Si no auto-detecta el puerto, selecciónalo manualmente en el combo y pulsa "Conectar".
+> ⚠️ **La app de escritorio ya no tiene soporte y fue eliminada del repositorio.** Todo el monitoreo y análisis ahora ocurre en el propio dispositivo (OLED) y por la consola serial (`HELP`, `STATUS`, `LAST`, `SCAN`, `INSPECT`, …), que funciona con cualquier terminal serial y no requiere software extra. Versiones anteriores de la app quedan en el historial de git, pero están sin mantenimiento y pueden no corresponder al firmware actual.
 
 ---
 

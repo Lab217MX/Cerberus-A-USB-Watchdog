@@ -37,6 +37,8 @@
 #include <string.h>
 #include <ctype.h>
 #include "resources.h"
+#include "Petme8x8.h"    // Custom GFX fonts used by the on-device mass-storage menu
+#include "Picopixel.h"
 
 extern "C" {
   #include "tusb.h"
@@ -77,6 +79,8 @@ dev_info_t dev_info[CFG_TUH_DEVICE_MAX] = { 0 };
 
 Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, RST_PIN);
 
+#include "GUI_Base.h"   // all on-device screens (drawn against `display`)
+
 typedef struct {
   char text[64];
 } DisplayMsg;
@@ -88,6 +92,16 @@ dev_info_t* get_first_mounted_device();
 void reinit_display();
 void showStatus(const char* message, uint8_t logoIndex);
 void draw(const char* text, uint8_t logoIndex);
+void showHome(const char* line);     // idle home screen (GUI_Base guiMainMenu)
+void redraw_resting();               // repaint the resting screen (home or last status)
+
+// Home-screen state: when active, the resting screen is the redesigned idle
+// home (guiMainMenu) showing `g_homeLine`; any transient alert via showStatus()
+// clears it so the alert stays put until the next showHome().
+char g_homeLine[20] = "Self-Test:ok";
+bool g_homeActive   = false;
+bool g_noDeviceActive = false;       // the "No device" screen is up (any key -> home)
+volatile bool g_massActive = false;  // mass device attached: detection screen is resting
 
 // Define the dimension of RAM DISK. We have a "real" one (for which
 // a real array is created) and a "fake" one, presented to the OS
@@ -98,11 +112,15 @@ void draw(const char* text, uint8_t logoIndex);
 
 Adafruit_USBD_MSC usb_msc;
 
-// Manual reset button wired GP3 to GND
-#define BTN_RST 3
-
-// Manual OK button wired GP6 to GND
-#define BTN_OK 6
+// Front-panel navigation buttons (each wired to GND, using internal pull-ups).
+//   Up     -> GP2    move the selection up / previous
+//   Accept -> GP3    open the menu / enter the highlighted item
+//   Bak    -> GP6    go back to the previous menu (or close the menu)
+//   Down   -> GP7    move the selection down / next
+#define BTN_UP     2
+#define BTN_ACCEPT 3
+#define BTN_BAK    6
+#define BTN_DOWN   7
 
 //
 // USBKiller Globals
@@ -154,7 +172,9 @@ uint8_t serial_buffer_idx = 0;
 //
 // Verbose Mode - Reduce serial output when disabled
 //
-boolean verbose_mode = true;        // Default: verbose on
+boolean verbose_mode = false;       // Default: OFF -- per-sector Read/Write LBA logging
+                                    // floods the console (the PC polls the emulated
+                                    // disk constantly). Enable with VERBOSE to debug I/O.
 boolean show_hexdump = false;       // Default: hexdump off (reduces noise)
 boolean show_hid_debug = false;     // Default: HID debug off (shows raw modifier bytes)
 
@@ -238,17 +258,21 @@ void service_wipe();
 // USB content explorer (implemented in usb_explorer.ino)
 //
 // Lets you inspect the files on a mass-storage device plugged into the HOST
-// port BEFORE it ever reaches the real PC: mount its FAT/exFAT filesystem
-// read-only, list directories and preview file contents (text/hex), either
-// over serial (LS/CAT) or on the OLED (hold OK while a drive is mounted).
+// port BEFORE it ever reaches the real PC: mount it read-only, list directories
+// and preview file contents (text/hex), either over serial (LS/CAT) or on the
+// OLED (hold OK while a drive is mounted). Supports FAT12/16/32 + exFAT, NTFS,
+// ext2/3/4 and ISO9660/Joliet across MBR/GPT partitions (see usb_explorer.ino).
 //
 void explorer_mount(uint8_t dev_addr);    // called from tuh_msc_mount_cb   (core1)
 void explorer_umount(uint8_t dev_addr);   // called from tuh_msc_umount_cb  (core1)
 void mscService();                        // called from loop1()            (core1)
 void explorer_ls(const char* path);       // serial LS command              (core0)
 void explorer_cat(const char* path);      // serial CAT command             (core0)
-void explorer_oled_browse();              // modal OLED file browser         (core0)
-extern volatile bool g_mscMounted;        // FAT/exFAT volume mounted & usable
+void explorer_scan();                     // serial SCAN command (recursive)  (core0)
+void explorer_inspect(const char* path);  // serial INSPECT command (deep)    (core0)
+void explorer_analyze();                  // modal OLED file analyzer         (core0)
+void explorer_menu();                     // modal 4-button on-device menu    (core0)
+extern volatile bool g_mscMounted;        // a browsable volume is mounted
 extern volatile bool g_mscPresent;        // a disk is attached (mountable or not)
 
 //
@@ -392,8 +416,10 @@ void setup() {
   // Set Lun ready (RAM disk is always ready)
   usb_msc.setUnitReady(true);
 
-  pinMode(BTN_RST, INPUT_PULLUP);
-  pinMode(BTN_OK, INPUT_PULLUP);
+  pinMode(BTN_UP, INPUT_PULLUP);
+  pinMode(BTN_DOWN, INPUT_PULLUP);
+  pinMode(BTN_ACCEPT, INPUT_PULLUP);
+  pinMode(BTN_BAK, INPUT_PULLUP);
 
   // USB killer detection wiring and interrupt setup
   pinMode(KILLER_PIN, INPUT_PULLUP);
@@ -421,7 +447,7 @@ void setup() {
   setNeoColor(0, 0, 255);  // Blue as the initial neutral status
 
   if (computed_hash == valid_hash) {
-    showStatus("Selftest: OK", LOGO_USB_CONNECTED);
+    showHome("Self-Test:ok");
   } else {
     showStatus("Selftest: KO", LOGO_ALERT_SYMBOL);
     showStatus("Stopping...", LOGO_ALERT_SYMBOL);
@@ -446,6 +472,17 @@ void setup1() {
 
 // Main Core0 loop: managing display
 void loop() {
+  // Greet a newly-opened serial terminal (rising edge of DTR / CDC connect).
+  // Polled here instead of via tud_cdc_line_state_cb so we don't interfere with
+  // the 1200bps-touch auto-reset used for flashing.
+  static bool cdc_prev = false;
+  bool cdc_now = (bool)SerialTinyUSB;
+  if (cdc_now && !cdc_prev) {
+    delay(60);                 // let the host finish opening the port
+    print_banner();
+  }
+  cdc_prev = cdc_now;
+
   // Process serial commands
   while (SerialTinyUSB.available()) {
     char c = SerialTinyUSB.read();
@@ -470,118 +507,58 @@ void loop() {
     }
   }
 
+  // Mass-storage attach/detach is flagged by the core1 MSC callbacks; paint the
+  // resulting screen here on core0 (never from core1 -- it would race on I2C).
+  static bool mass_prev = false;
+  if (g_massActive != mass_prev) {
+    mass_prev = g_massActive;
+    if (g_massActive) { if (!descriptor_view_active) guiMassDetect(); }  // detection screen
+    else              showHome(g_homeLine);                              // device gone -> home
+  }
+
   //
-  // "Bak" button (BTN_RST):
-  //   - short press -> browse the USB descriptor pages (original behaviour)
-  //   - hold >= WIPE_HOLD_MS while a mass-storage device is mounted -> wipe it
+  // Front-panel buttons (edge-triggered on press). Resting-screen dependent:
+  //   - "No device" screen up  -> ANY key returns to home.
+  //   - Mass DETECTION screen  -> Ok/Up/Down open the interactive menu; Bak -> home.
+  //   - Home screen            -> Accept with a device opens the menu, otherwise
+  //                               shows the "No device" screen.
+  // explorer_menu() is a blocking modal that owns all four buttons while open.
   //
-  static bool     rst_prev = true;
-  static uint32_t bak_press_start = 0;
-  static bool     bak_wipe_fired = false;   // Ensures a single wipe per hold
-  static bool     bak_countdown = false;    // A wipe countdown is on screen
-  static uint32_t bak_last_hint = 0;        // Throttles the countdown redraws
-  bool rst_now = digitalRead(BTN_RST);
-  if (rst_now != rst_prev) {
-    SerialTinyUSB.printf("BTN_RST %s\n", rst_now == LOW ? "PRESSED -> descriptors" : "released");
-    rst_prev = rst_now;
-    if (rst_now == LOW) {
-      bak_press_start = to_ms_since_boot(get_absolute_time());
-      bak_wipe_fired = false;
-      bak_countdown = false;
-      bak_last_hint = 0;
-      if (descriptor_view_active == false) {
-        descriptor_view_active = true;
-        descriptor_page = 0;
-      } else {
-        descriptor_page++;
-      }
-      show_descriptor_page();
+  static bool accept_prev = true, up_prev = true, down_prev = true, bak_prev = true;
+  bool accept_now = digitalRead(BTN_ACCEPT);
+  bool up_now     = digitalRead(BTN_UP);
+  bool down_now   = digitalRead(BTN_DOWN);
+  bool bak_now    = digitalRead(BTN_BAK);
+  bool accept_press = (accept_now != accept_prev) && (accept_now == LOW); accept_prev = accept_now;
+  bool up_press     = (up_now     != up_prev)     && (up_now     == LOW); up_prev     = up_now;
+  bool down_press   = (down_now   != down_prev)   && (down_now   == LOW); down_prev   = down_now;
+  bool bak_press    = (bak_now    != bak_prev)    && (bak_now    == LOW); bak_prev    = bak_now;
+  bool any_press    = accept_press || up_press || down_press || bak_press;
+  bool devicePresent = (get_first_mounted_device() != NULL || g_mscPresent);
+
+  if (g_noDeviceActive) {
+    if (any_press) {                       // any key dismisses -> home
+      g_noDeviceActive = false;
+      showHome(g_homeLine);
+      setNeoColor(0, 0, 255);
+    }
+  } else if (g_massActive) {
+    // Mass DETECTION screen: any button EXCEPT Bak (disabled here) opens the
+    // interactive submenu. Bak does nothing; the screen clears on disconnect.
+    if (accept_press || up_press || down_press) {
+      explorer_menu();                     // interactive Info/Files/Wipe (highlighted)
+      if (devicePresent) guiMassDetect();  // back to the detection screen
+      else { g_massActive = false; showHome(g_homeLine); }
+    }
+  } else if (accept_press) {
+    if (devicePresent) {
+      explorer_menu();
+      redraw_resting();
     } else {
-      bak_press_start = 0;
-      // Released in time while a wipe countdown was showing: cancel and restore
-      if (bak_countdown && !bak_wipe_fired && !wipe_in_progress) {
-        bak_countdown = false;
-        descriptor_view_active = false;
-        descriptor_page = 0;
-        draw(current_gui_message, current_logo_index);
-      }
-    }
-  }
-
-  // Sustained hold detection: only arms while a mass-storage device is mounted.
-  if (rst_now == LOW && bak_press_start != 0 && !bak_wipe_fired &&
-      msc_mounted && !wipe_in_progress) {
-    uint32_t now = to_ms_since_boot(get_absolute_time());
-    uint32_t held = now - bak_press_start;
-    if (held >= WIPE_HOLD_MS) {
-      // Fire the wipe: core1 (host stack) picks up wipe_requested in loop1()
-      bak_wipe_fired = true;
-      bak_countdown = false;
-      descriptor_view_active = false;
-      descriptor_page = 0;
-      wipe_done = false;
-      wipe_error = false;
-      wipe_done_reported = false;
-      wipe_error_reported = false;
-      wipe_requested = true;
-      showStatus("WIPING DISK", LOGO_ALERT_SYMBOL);
-      setNeoColor(255, 165, 0);
-    } else if (held >= 700 && (now - bak_last_hint) >= 300) {
-      // Warn with a countdown so an accidental hold can be released in time.
-      // Use draw() (not showStatus) so the cached normal status is preserved.
-      bak_last_hint = now;
-      bak_countdown = true;
-      descriptor_view_active = false;
-      descriptor_page = 0;
-      uint32_t remain = (WIPE_HOLD_MS - held + 999) / 1000;
-      char hint[24];
-      snprintf(hint, sizeof(hint), "Hold: WIPE %lus", (unsigned long)remain);
-      draw(hint, LOGO_ALERT_SYMBOL);
-    }
-  }
-
-  //
-  // "OK" button (BTN_OK):
-  //   - short press -> exit descriptor view / refresh the display (original behaviour)
-  //   - hold >= OK_HOLD_MS while a mass-storage device is attached -> open the
-  //     OLED file browser so the USB can be inspected before trusting it.
-  //
-  // The short-press action is deferred to release so a hold isn't also treated
-  // as a short press.
-  #define OK_HOLD_MS 1000
-  static bool     ok_prev = true;
-  static uint32_t ok_press_start = 0;
-  static bool     ok_hold_fired = false;
-  bool ok_now = digitalRead(BTN_OK);
-  if (ok_now != ok_prev) {
-    ok_prev = ok_now;
-    if (ok_now == LOW) {
-      ok_press_start = to_ms_since_boot(get_absolute_time());
-      ok_hold_fired = false;
-    } else {
-      // Released: run the short-press action only if a hold didn't already fire
-      if (!ok_hold_fired) {
-        if (descriptor_view_active) {
-          SerialTinyUSB.println("BTN_OK pressed -> exit descriptor view");
-          exit_descriptor_view();
-        } else {
-          SerialTinyUSB.println("BTN_OK pressed -> refresh display");
-          reinit_display();
-        }
-      }
-      ok_press_start = 0;
-    }
-  }
-
-  // Sustained OK hold -> launch the file browser (only when a drive is attached)
-  if (ok_now == LOW && ok_press_start != 0 && !ok_hold_fired && msc_mounted) {
-    uint32_t held = to_ms_since_boot(get_absolute_time()) - ok_press_start;
-    if (held >= OK_HOLD_MS) {
-      ok_hold_fired = true;
-      descriptor_view_active = false;
-      descriptor_page = 0;
-      explorer_oled_browse();          // blocks until the user backs out
-      draw(current_gui_message, current_logo_index);
+      SerialTinyUSB.println("BTN_ACCEPT pressed -> no USB device");
+      g_homeActive = false;
+      g_noDeviceActive = true;
+      guiNoDevice();
     }
   }
 
@@ -590,7 +567,9 @@ void loop() {
   }
 
   if (usbkiller == true) {
-    showStatus("USB Killer", LOGO_EVIL_SYMBOL);
+    g_homeActive = false;                 // persistent alert screen
+    guiBadUsb();
+    SerialTinyUSB.println("USB Killer");
     usbkiller = false;
     setNeoColor(255, 0, 0);
   }
@@ -629,18 +608,17 @@ void loop() {
   }
 
   if (suspicious_device == true && suspicious_reported == false) {
-    char alert_msg[24];
-    snprintf(alert_msg, sizeof(alert_msg), "SUSP: %s", suspicious_name);
-    showStatus(alert_msg, LOGO_EVIL_SYMBOL);
+    g_homeActive = false;
+    guiHidDetect(suspicious_name, hid_current_speed);
+    SerialTinyUSB.printf("[!] Suspicious HID: %s (%.1f k/s)\r\n", suspicious_name, hid_current_speed);
     suspicious_device = false;
     suspicious_reported = true;
     setNeoColor(255, 165, 0);
   }
 
   if (hid_speed_alert == true && hid_speed_reported == false) {
-    char speed_msg[24];
-    snprintf(speed_msg, sizeof(speed_msg), "AUTO %.0f k/s", hid_current_speed);
-    showStatus(speed_msg, LOGO_EVIL_SYMBOL);
+    g_homeActive = false;
+    guiHidDetect(suspicious_name[0] ? suspicious_name : "unknown", hid_current_speed);
     SerialTinyUSB.printf("[!!!] AUTOMATED TYPING: %.1f keys/sec\r\n", hid_current_speed);
     hid_speed_reported = true;
     setNeoColor(255, 0, 255);
@@ -817,8 +795,19 @@ void printout(const char *str)
   SerialTinyUSB.println(str);
 }
 
+// Printed once whenever a serial terminal connects (see the DTR edge in loop()).
+void print_banner() {
+  SerialTinyUSB.println("\r\n======================================");
+  SerialTinyUSB.printf(  "  %s\r\n", VERSION);
+  SerialTinyUSB.println(  "  USB firewall / inspector");
+  SerialTinyUSB.println(  "  Type HELP for commands");
+  SerialTinyUSB.println("======================================\r\n");
+}
+
 // Updates the cached GUI message/icon and mirrors the same text over serial.
 void showStatus(const char* str, uint8_t logoIndex) {
+  g_homeActive = false;                 // a transient status replaces the home screen
+  g_noDeviceActive = false;             // ...and dismisses the "No device" screen
   const char* sanitized = str;
   while (*sanitized == '\n') {
     sanitized++;
@@ -838,6 +827,25 @@ void showStatus(const char* str, uint8_t logoIndex) {
   SerialTinyUSB.println(str);
 }
 
+// Shows the redesigned idle home screen and remembers it as the resting screen.
+void showHome(const char* line) {
+  strncpy(g_homeLine, line, sizeof(g_homeLine) - 1);
+  g_homeLine[sizeof(g_homeLine) - 1] = '\0';
+  g_homeActive = true;
+  g_noDeviceActive = false;
+  if (!descriptor_view_active) guiMainMenu(g_homeLine);
+  SerialTinyUSB.println(line);
+}
+
+// Repaints the current resting screen: the mass-storage DETECTION screen (the
+// options shown with no row highlighted) if a device is attached, else the home
+// screen, else the last status message.
+void redraw_resting() {
+  if (g_massActive && (get_first_mounted_device() != NULL || g_mscPresent)) guiMassDetect();
+  else if (g_homeActive) guiMainMenu(g_homeLine);
+  else                   draw(current_gui_message, current_logo_index);
+}
+
 dev_info_t* get_first_mounted_device() {
   for (int i = 0; i < CFG_TUH_DEVICE_MAX; i++) {
     if (dev_info[i].mounted) {
@@ -849,42 +857,63 @@ dev_info_t* get_first_mounted_device() {
 
 // Prints the currently selected descriptor page to both OLED and serial consoles.
 void show_descriptor_page() {
-  cls();
   dev_info_t* dev = get_first_mounted_device();
   if (dev == NULL) {
-    printout("\n[!] No devices");
+    SerialTinyUSB.println("\r\n[!] No devices");
+    const char* f[1] = { "(no device)" };
+    guiDescPage("Desc [-/-]", f, 1);
     return;
   }
 
   tusb_desc_device_t *desc = &dev->desc_device;
-  char buf[48];
   uint8_t page = descriptor_page % 3;
 
+  // OLED: a short "Key:Val" per grid cell. Serial: the full, verbose lines.
+  char f0[22], f1[22], f2[22], f3[22], f4[22], f5[22], f6[22];
+  const char* fields[7] = {0};
+  const char* title;
+  int n = 0;
+
   if (page == 0) {
-    printout("\n[Desc 1/3]");
-    snprintf(buf, sizeof(buf), "\nVID:%04X PID:%04X", desc->idVendor, desc->idProduct);
-    printout(buf);
-    snprintf(buf, sizeof(buf), "\nUSB:%04X Dev:%04X", desc->bcdUSB, desc->bcdDevice);
-    printout(buf);
-    snprintf(buf, sizeof(buf), "\nCls:%u Sub:%u Proto:%u", desc->bDeviceClass, desc->bDeviceSubClass, desc->bDeviceProtocol);
-    printout(buf);
+    title = "Desc [1/3]";
+    snprintf(f0, sizeof(f0), "VID:%04X", desc->idVendor);
+    snprintf(f1, sizeof(f1), "PID:%04X", desc->idProduct);
+    snprintf(f2, sizeof(f2), "USB:%04X", desc->bcdUSB);
+    snprintf(f3, sizeof(f3), "Dev:%04X", desc->bcdDevice);
+    snprintf(f4, sizeof(f4), "Cls:%u", desc->bDeviceClass);
+    snprintf(f5, sizeof(f5), "Sub:%u", desc->bDeviceSubClass);
+    snprintf(f6, sizeof(f6), "Pro:%u", desc->bDeviceProtocol);
+    fields[0]=f0; fields[1]=f1; fields[2]=f2; fields[3]=f3; fields[4]=f4; fields[5]=f5; fields[6]=f6; n=7;
+    SerialTinyUSB.println("\r\n[Desc 1/3]");
+    SerialTinyUSB.printf("VID:%04X PID:%04X\r\n", desc->idVendor, desc->idProduct);
+    SerialTinyUSB.printf("USB:%04X Dev:%04X\r\n", desc->bcdUSB, desc->bcdDevice);
+    SerialTinyUSB.printf("Cls:%u Sub:%u Proto:%u\r\n", desc->bDeviceClass, desc->bDeviceSubClass, desc->bDeviceProtocol);
   } else if (page == 1) {
-    printout("\n[Desc 2/3]");
-    snprintf(buf, sizeof(buf), "\nPkt0:%u Config:%u", desc->bMaxPacketSize0, desc->bNumConfigurations);
-    printout(buf);
-    snprintf(buf, sizeof(buf), "\nManu ID:%u Prod ID:%u", desc->iManufacturer, desc->iProduct);
-    printout(buf);
-    snprintf(buf, sizeof(buf), "\nSerial ID:%u", desc->iSerialNumber);
-    printout(buf);
+    title = "Desc [2/3]";
+    snprintf(f0, sizeof(f0), "Pkt0:%u", desc->bMaxPacketSize0);
+    snprintf(f1, sizeof(f1), "Cfg:%u", desc->bNumConfigurations);
+    snprintf(f2, sizeof(f2), "ManID:%u", desc->iManufacturer);
+    snprintf(f3, sizeof(f3), "PrdID:%u", desc->iProduct);
+    snprintf(f4, sizeof(f4), "SerID:%u", desc->iSerialNumber);
+    fields[0]=f0; fields[1]=f1; fields[2]=f2; fields[3]=f3; fields[4]=f4; n=5;
+    SerialTinyUSB.println("\r\n[Desc 2/3]");
+    SerialTinyUSB.printf("Pkt0:%u Config:%u\r\n", desc->bMaxPacketSize0, desc->bNumConfigurations);
+    SerialTinyUSB.printf("Manu ID:%u Prod ID:%u\r\n", desc->iManufacturer, desc->iProduct);
+    SerialTinyUSB.printf("Serial ID:%u\r\n", desc->iSerialNumber);
   } else {
-    printout("\n[Desc 3/3]");
-    snprintf(buf, sizeof(buf), "\nManu: %s", (char *)dev->manufacturer);
-    printout(buf);
-    snprintf(buf, sizeof(buf), "\nProd: %s", (char *)dev->product);
-    printout(buf);
-    snprintf(buf, sizeof(buf), "\nSerial: %s", (char *)dev->serial);
-    printout(buf);
+    title = "Desc [3/3]";
+    // Long strings: use the left-column slots (0,2,4) full-width; leave 1,3 empty.
+    snprintf(f0, sizeof(f0), "Mn:%.18s", (char *)dev->manufacturer);
+    snprintf(f2, sizeof(f2), "Pd:%.18s", (char *)dev->product);
+    snprintf(f4, sizeof(f4), "Sn:%.18s", (char *)dev->serial);
+    fields[0]=f0; fields[1]=NULL; fields[2]=f2; fields[3]=NULL; fields[4]=f4; n=5;
+    SerialTinyUSB.println("\r\n[Desc 3/3]");
+    SerialTinyUSB.printf("Manu: %s\r\n", (char *)dev->manufacturer);
+    SerialTinyUSB.printf("Prod: %s\r\n", (char *)dev->product);
+    SerialTinyUSB.printf("Serial: %s\r\n", (char *)dev->serial);
   }
+
+  guiDescPage(title, fields, n);
 }
 
 // Returns to the normal GUI once the descriptor view button is released.
@@ -892,7 +921,7 @@ void exit_descriptor_view() {
   descriptor_view_active = false;
   descriptor_page = 0;
   cls();
-  draw(current_gui_message, current_logo_index);
+  redraw_resting();
 }
 
 // Clear display
@@ -912,7 +941,7 @@ void reinit_display() {
     return;
   }
   cls();
-  draw(current_gui_message, current_logo_index);
+  redraw_resting();
 }
 
 void hexDump(unsigned char* data, size_t size) {
@@ -1034,7 +1063,7 @@ static void print_device_descriptor(tuh_xfer_t *xfer)
   SerialTinyUSB.printf("  idProduct           0x%04x\r\n" , desc->idProduct);
   SerialTinyUSB.printf("  bcdDevice           %04x\r\n"   , desc->bcdDevice);
   // -------- Manufacturer String --------
-  SerialTinyUSB.printf("  iManufacturer       %u\r", desc->iManufacturer);
+  SerialTinyUSB.printf("  iManufacturer       %u", desc->iManufacturer);
   if (desc->iManufacturer &&
       XFER_RESULT_SUCCESS ==
         tuh_descriptor_get_manufacturer_string_sync(daddr,
@@ -1043,12 +1072,12 @@ static void print_device_descriptor(tuh_xfer_t *xfer)
                                                     sizeof(dev->manufacturer))) {
 
     utf16_to_utf8(dev->manufacturer, sizeof(dev->manufacturer));
-    SerialTinyUSB.printf(" --- %s\r", (char *) dev->manufacturer);
+    SerialTinyUSB.printf(" --- %s", (char *) dev->manufacturer);
   }
-  SerialTinyUSB.printf("\n");
+  SerialTinyUSB.printf("\r\n");
 
   // -------- Product String --------
-  SerialTinyUSB.printf("  iProduct            %u\r", desc->iProduct);
+  SerialTinyUSB.printf("  iProduct            %u", desc->iProduct);
   if (desc->iProduct &&
       XFER_RESULT_SUCCESS ==
         tuh_descriptor_get_product_string_sync(daddr,
@@ -1057,11 +1086,11 @@ static void print_device_descriptor(tuh_xfer_t *xfer)
                                                sizeof(dev->product))) {
 
     utf16_to_utf8(dev->product, sizeof(dev->product));
-    SerialTinyUSB.printf(" --- %s\r", (char *) dev->product);
+    SerialTinyUSB.printf(" --- %s", (char *) dev->product);
   }
-  SerialTinyUSB.printf("\n");
+  SerialTinyUSB.printf("\r\n");
   // -------- Serial Number String --------
-  SerialTinyUSB.printf("  iSerialNumber       %u\r", desc->iSerialNumber);
+  SerialTinyUSB.printf("  iSerialNumber       %u", desc->iSerialNumber);
   if (desc->iSerialNumber &&
       XFER_RESULT_SUCCESS ==
         tuh_descriptor_get_serial_string_sync(daddr,
@@ -1070,9 +1099,9 @@ static void print_device_descriptor(tuh_xfer_t *xfer)
                                               sizeof(dev->serial))) {
 
     utf16_to_utf8(dev->serial, sizeof(dev->serial));
-    SerialTinyUSB.printf(" --- %s\r", (char *) dev->serial);
+    SerialTinyUSB.printf(" --- %s", (char *) dev->serial);
   }
-  SerialTinyUSB.printf("\n");
+  SerialTinyUSB.printf("\r\n");
   SerialTinyUSB.printf("  bNumConfigurations  %u\r\n", desc->bNumConfigurations);
   SerialTinyUSB.printf("======================================\r\n");
 }
@@ -1335,12 +1364,12 @@ static void process_kbd_report(hid_keyboard_report_t const* report) {
           SerialTinyUSB.print(marker);
           // Newline after ENTER so the next keystroke starts on a fresh line
           if (keycode == HID_KEY_ENTER || keycode == HID_KEY_KEYPAD_ENTER) {
-            SerialTinyUSB.print("\n");
+            SerialTinyUSB.print("\r\n");
           }
         } else if (is_printable) {
           SerialTinyUSB.printf("%c", ch);
         } else if (ch == '\r') {
-          SerialTinyUSB.print("<ENTER>\n");
+          SerialTinyUSB.print("<ENTER>\r\n");
         } else if (ch == '\t') {
           SerialTinyUSB.print("<TAB>");
         } else if (ch == '\b' || ch == 0x08) {
@@ -1471,7 +1500,12 @@ void setNeoColor(uint8_t r, uint8_t g, uint8_t b) {
 
 // Invoked when a device with MassStorage interface is mounted
 void tuh_msc_mount_cb(uint8_t dev_addr) {
-  showStatus("Mass Device", LOGO_USB_CONNECTED);
+  // Flag the mass-storage DETECTION state. Do NOT draw here: this runs on core1,
+  // and the OLED (I2C) is driven by core0 -- a cross-core draw races on the Wire
+  // bus. core0 sees g_massActive change in loop() and paints the screen.
+  g_homeActive = false;
+  g_noDeviceActive = false;
+  g_massActive = true;
   setNeoColor(0, 255, 0);
   SerialTinyUSB.printf("Mass Device attached, address = %d\r\n", dev_addr);
 
@@ -1503,6 +1537,7 @@ void tuh_msc_umount_cb(uint8_t dev_addr) {
     wipe_requested   = false;
   }
   explorer_umount(dev_addr);
+  g_massActive = false;                 // device gone; core0 repaints home (see loop)
 }
 
 //
@@ -1672,8 +1707,17 @@ void process_serial_command(const char* cmd) {
     }
     return;
   }
+  else if (strcmp(keyword, "SCAN") == 0) {
+    explorer_scan();
+    return;
+  }
+  else if (strcmp(keyword, "INSPECT") == 0) {
+    if (!arg[0]) SerialTinyUSB.println("[!] Usage: INSPECT <path>");
+    else         explorer_inspect(arg);
+    return;
+  }
   else if (strcmp(keyword, "BROWSE") == 0) {
-    explorer_oled_browse();
+    explorer_analyze();
     return;
   }
 
@@ -1689,9 +1733,11 @@ void process_serial_command(const char* cmd) {
     SerialTinyUSB.println("HIDDEBUG - Toggle HID raw debug");
     SerialTinyUSB.println("CLEAR    - Clear last device info");
     SerialTinyUSB.println("WIPE     - Destroy partition tables of mounted USB");
-    SerialTinyUSB.println("LS [path]- List a directory on the mounted USB");
+    SerialTinyUSB.println("LS [path]- List dir on USB (LS / = volume list; LS /N = volume N)");
     SerialTinyUSB.println("CAT path - Preview a file (text + hex) on the USB");
-    SerialTinyUSB.println("BROWSE   - Open the file browser on the OLED");
+    SerialTinyUSB.println("SCAN     - Recursively list files + type + archive/polyglot checks");
+    SerialTinyUSB.println("INSPECT p- Deep look inside one file (zip entries + 1MB sig sweep)");
+    SerialTinyUSB.println("BROWSE   - Open the file analyzer on the OLED");
     SerialTinyUSB.println("=========================\r\n");
   }
   else if (strcmp(upper, "STATUS") == 0) {
@@ -1864,13 +1910,10 @@ void draw(const char* text, uint8_t logoIndex) {
     display.println("Cerberus");
     display.drawBitmap(51, 0, image_Lock_bits, 7, 8, SSD1306_WHITE);
 
-    // Footer / soft-keys
-    display.setCursor(12, 54);
-    display.println("OK");
-    display.drawBitmap(98, 55, image_arrow_curved_left_up_bits, 8, 5, SSD1306_WHITE);
-    display.setCursor(109, 54);
-    display.println("Bak");
+    // Footer / soft-keys: at the status screen only "Accept" is live (opens the menu)
     display.drawBitmap(2, 54, image_Quest_bits, 7, 8, SSD1306_WHITE);
+    display.setCursor(12, 54);
+    display.println("Accept: Menu");
 
     // Main icon
     const LogoAsset& asset = LOGO_ASSETS[(LOGO_COUNT > 0) ? (logoIndex % LOGO_COUNT) : 0];

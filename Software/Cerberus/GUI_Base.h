@@ -1,0 +1,296 @@
+/*
+  Cerberus - GUI_Base.h
+
+  The whole on-device GUI in one place: every screen as a small, parameterized
+  draw function plus the (shared, de-duplicated) 1-bit artwork it needs. Lopaka
+  exported each screen as an isolated snippet with hard-coded demo text and very
+  long image names; this header is the cleaned-up, integratable version:
+
+    - one include of the fonts, one copy of each bitmap (short, friendly names),
+    - every screen is a function that takes the real data to display,
+    - a shared footer helper (Ok / Bak soft-keys) instead of repeating it.
+
+  Rendering targets the global `display` (Adafruit_SSD1306, 128x64) declared in
+  Cerberus.ino, so this header must be included after `display`. Colour 1 = white
+  (lit pixel), 0 = black, matching SSD1306_WHITE / SSD1306_BLACK.
+*/
+
+#pragma once
+
+#include "Petme8x8.h"     // title / label font
+#include "Picopixel.h"    // tiny footer / detail font
+
+// ---------------------------------------------------------------------------
+// Artwork (each defined once; friendly names replace the lopaka export names)
+// ---------------------------------------------------------------------------
+// Footer soft-key glyphs (7x7)
+static const unsigned char PROGMEM img_ok[]  = {0x14,0x14,0x7e,0x28,0xfc,0x50,0x50};   // was image_ok_sym_bits
+static const unsigned char PROGMEM img_bak[] = {0x92,0x54,0x38,0xfe,0x38,0x54,0x92};   // was image_bak_sym_bits
+
+// Mass-storage menu row icons
+static const unsigned char PROGMEM img_quest[] = {0x78,0xcc,0xcc,0x0c,0x18,0x30,0x00,0x30};                      // 7x8  (Info)
+static const unsigned char PROGMEM img_sd[]    = {0xff,0xe0,0xff,0x20,0xff,0xe0,0xff,0x20,0xff,0xe0,0xff,0x20,0xff,0xe0,0xe6,0x00}; // 11x8 (Files)
+static const unsigned char PROGMEM img_alert[] = {0x08,0x00,0x1c,0x00,0x14,0x00,0x36,0x00,0x36,0x00,0x7f,0x00,0x77,0x00,0xff,0x80}; // 9x8  (Wipe)
+
+// Small status glyphs
+static const unsigned char PROGMEM img_help[]   = {0x00,0x00,0x0f,0x00,0x30,0xc0,0x46,0x20,0x4f,0x20,0x89,0x10,0x83,0x10,0x86,0x10,0x86,0x10,0x40,0x20,0x46,0x20,0x30,0xc0,0x0f,0x00,0x00,0x00,0x00,0x00,0x00,0x00}; // 12x16 (Info pages)
+static const unsigned char PROGMEM img_hidden[] = {0x7f,0x80,0x7e,0x80,0x7f,0x80,0x40,0x80,0xfe,0x80,0x82,0x80,0x83,0x80,0xfe,0x00}; // 9x8  (file list header)
+
+// Open folder (21x21): shown when there is no device to open a menu for
+static const unsigned char PROGMEM img_folder[] = {0x0f,0xff,0xc0,0x08,0x00,0xe0,0x08,0x00,0xf0,0x08,0x00,0xf8,0x08,0x00,0xf8,0x08,0x44,0x08,0x08,0x00,0x08,0x08,0x38,0x08,0x7c,0x00,0x08,0x82,0x00,0x08,0x81,0xff,0x88,0x80,0x00,0x48,0x40,0x00,0x48,0x40,0x00,0x28,0x20,0x00,0x28,0x20,0x00,0x18,0x10,0x00,0x18,0x10,0x00,0x08,0x08,0x00,0x08,0x08,0x00,0x08,0x07,0xff,0xf0};
+
+// USB flash drive (21x21): shown on the mass-storage detection screen
+static const unsigned char PROGMEM img_flashdrive[] = {0x01,0xfc,0x00,0x02,0x02,0x00,0x02,0xfa,0x00,0x02,0x02,0x00,0x02,0x02,0x00,0x07,0xff,0x00,0x04,0x01,0x00,0x04,0x21,0x00,0x04,0x21,0x00,0x05,0x21,0x00,0x05,0x25,0x00,0x05,0x25,0x00,0x04,0xa9,0x00,0x04,0x71,0x00,0x04,0x71,0x00,0x04,0x71,0x00,0x04,0x01,0x00,0x04,0x01,0x00,0x04,0x01,0x00,0x02,0x02,0x00,0x01,0xfc,0x00};
+
+// Large illustrations (21x21 unless noted)
+static const unsigned char PROGMEM img_hand_ok[]  = {0x05,0x80,0x00,0x0a,0x40,0x00,0x0a,0x40,0x00,0x1a,0x40,0x00,0x2a,0x40,0x00,0x2a,0x4f,0x00,0x2a,0x50,0x80,0x2a,0x60,0x40,0x28,0x46,0x20,0x22,0x89,0x20,0x2a,0x90,0xc0,0x28,0x11,0x20,0x20,0x11,0x20,0x20,0x0e,0x20,0x20,0x00,0x40,0x10,0x00,0x40,0x10,0x00,0x80,0x08,0x01,0x00,0x1f,0xff,0x80,0x1f,0xf9,0x80,0x1f,0xff,0x80}; // home: self-test ok
+static const unsigned char PROGMEM img_skull[]    = {0x60,0x00,0x60,0xe0,0x00,0x70,0xf0,0x00,0xf0,0x39,0xf9,0xc0,0x1e,0x07,0x80,0x08,0x01,0x00,0x08,0x01,0x00,0x13,0x0c,0x80,0x17,0x9e,0x80,0x27,0x9e,0x40,0x23,0x0c,0x40,0x20,0x00,0x40,0x20,0x60,0x40,0x10,0x00,0x80,0x08,0x01,0x00,0x1c,0x03,0x80,0x3c,0x93,0xc0,0xf4,0x92,0xf0,0xe3,0xfc,0x70,0x60,0x00,0x60,0x00,0x00,0x00}; // USB killer
+static const unsigned char PROGMEM img_keyboard[] = {0x00,0x08,0x00,0x00,0x08,0x00,0x0f,0xf0,0x00,0x10,0x00,0x00,0x10,0x00,0x00,0x0f,0xfc,0x00,0x00,0x02,0x00,0x00,0x01,0x00,0x00,0x02,0x00,0x00,0xfc,0x00,0x01,0x00,0x00,0x01,0x00,0x00,0x7f,0xff,0xf0,0x80,0x00,0x08,0x95,0x55,0x08,0x80,0x00,0x48,0xaa,0xaa,0xc8,0x80,0x00,0x08,0x9b,0xfe,0xc8,0x80,0x00,0x08,0x7f,0xff,0xf0}; // HID attack
+static const unsigned char PROGMEM img_alert_tri[]= {0x00,0x20,0x00,0x00,0x50,0x00,0x00,0x88,0x00,0x00,0x88,0x00,0x01,0x04,0x00,0x01,0x04,0x00,0x02,0x72,0x00,0x02,0xda,0x00,0x04,0xe9,0x00,0x04,0xe9,0x00,0x08,0xf8,0x80,0x08,0x70,0x80,0x10,0x70,0x40,0x10,0x00,0x40,0x20,0x70,0x20,0x20,0xf8,0x20,0x40,0xf8,0x10,0x40,0xf8,0x10,0x80,0x70,0x08,0x80,0x00,0x08,0x7f,0xff,0xf0}; // wipe confirm
+static const unsigned char PROGMEM img_file_bug[] = {0x7f,0xff,0xc0,0x80,0x00,0x20,0xaa,0x00,0x20,0x80,0x00,0x20,0xff,0xff,0xe0,0x80,0x00,0x20,0x80,0x00,0x20,0xbf,0x01,0x20,0x80,0x0c,0x80,0x80,0x13,0xa0,0xbf,0x96,0xc0,0x80,0x0f,0xf0,0x80,0x2a,0xa8,0xbf,0x9f,0xe0,0x80,0x06,0xc0,0x80,0x0b,0x80,0x7f,0xe2,0x10,0x00,0x01,0x00,0x00,0x00,0x10,0x06,0x66,0x60,0x08,0x00,0x00}; // hex viewer
+
+// Mass-menu illustration (42x42): a "search for bugs" magnifier over code
+static const unsigned char PROGMEM img_bug[] = {0x00,0x0f,0xfc,0x00,0x00,0x00,0x00,0x0f,0xfc,0x00,0x00,0x00,0x00,0xf0,0x03,0xc0,0x00,0x00,0x00,0xf0,0x03,0xc0,0x00,0x00,0x03,0x00,0x00,0x30,0x00,0x00,0x03,0x00,0x00,0x30,0x00,0x00,0x0c,0x0f,0x3c,0x0c,0x00,0x00,0x0c,0x0f,0x3c,0x0c,0x00,0x00,0x30,0xc3,0xf0,0xc3,0x00,0x00,0x30,0xc3,0xf0,0xc3,0x00,0x00,0x30,0xcc,0x0c,0xc3,0x00,0x00,0x30,0xcc,0x0c,0xc3,0x00,0x00,0xc0,0x3f,0xff,0x00,0xc0,0x00,0xc0,0x3f,0xff,0x00,0xc0,0x00,0xc0,0x3f,0xff,0x00,0xc0,0x00,0xc0,0x3f,0xff,0x00,0xc0,0x00,0xc3,0xf0,0x03,0xf0,0xc0,0x00,0xc3,0xf0,0x03,0xf0,0xc0,0x00,0xc0,0x3f,0x3f,0x00,0xc0,0x00,0xc0,0x3f,0x3f,0x00,0xc0,0x00,0xc0,0x3f,0x3f,0x00,0xc0,0x00,0xc0,0x3f,0x3f,0x00,0xc0,0x00,0x30,0xff,0x3f,0xc3,0x00,0x00,0x30,0xff,0x3f,0xc3,0x00,0x00,0x30,0xc3,0xf0,0xc3,0x00,0x00,0x30,0xc3,0xf0,0xc3,0x00,0x00,0x0c,0x00,0x00,0x0f,0xc0,0x00,0x0c,0x00,0x00,0x0f,0xc0,0x00,0x03,0x00,0x00,0x3f,0xf0,0x00,0x03,0x00,0x00,0x3f,0xf0,0x00,0x00,0xf0,0x03,0xff,0x3c,0x00,0x00,0xf0,0x03,0xff,0x3c,0x00,0x00,0x0f,0xfc,0x3f,0xcf,0x00,0x00,0x0f,0xfc,0x3f,0xcf,0x00,0x00,0x00,0x00,0x0f,0xf3,0x00,0x00,0x00,0x00,0x0f,0xf3,0x00,0x00,0x00,0x00,0x03,0xff,0x00,0x00,0x00,0x00,0x03,0xff,0x00,0x00,0x00,0x00,0x00,0xfc,0x00,0x00,0x00,0x00,0x00,0xfc,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+
+// ---------------------------------------------------------------------------
+// Shared bits
+// ---------------------------------------------------------------------------
+// Ok / Bak soft-key hints, bottom-right. Every screen shows these.
+static void guiFooter() {
+  display.drawBitmap(76, 56, img_ok, 7, 7, SSD1306_WHITE);
+  display.drawBitmap(101, 56, img_bak, 7, 7, SSD1306_WHITE);
+  display.setFont(&Picopixel);
+  display.setCursor(86, 61);  display.print("Ok");
+  display.setCursor(111, 61); display.print("Bak");
+}
+
+// Call once at the top of every screen.
+static void guiBegin() {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextWrap(false);
+}
+
+// ---------------------------------------------------------------------------
+// Screens
+// ---------------------------------------------------------------------------
+
+// Idle / home. `selfTest` is the real power-on self-test line, e.g.
+// "Self-Test:ok" or "Self-Test:FAIL".
+void guiMainMenu(const char* selfTest) {
+  guiBegin();
+  display.setFont(&Petme8x8);
+  display.setCursor(0, 11);  display.print("Cerberus");
+  display.drawBitmap(3, 24, img_hand_ok, 21, 21, SSD1306_WHITE);
+  display.setCursor(26, 40); display.print(selfTest);
+  guiFooter();                                   // Picopixel from here on
+  display.setCursor(2, 61);  display.print("By: Lab217");
+  display.setFont();
+  display.display();
+}
+
+// Mass-storage DETECTION screen: a device was just attached. Distinct from the
+// options menu -- any button except Bak opens the menu (handled by the caller).
+void guiMassDetect() {
+  guiBegin();
+  display.setFont(&Petme8x8);
+  display.setCursor(0, 11);  display.print("Cerberus");
+  display.setCursor(29, 36); display.print("Mass storage");
+  display.drawBitmap(2, 21, img_flashdrive, 21, 21, SSD1306_WHITE);
+  guiFooter();
+  display.setFont();
+  display.display();
+}
+
+// Mass-storage options menu. `sel`: 0=Info, 1=Files, 2=Wipe (highlighted row is
+// drawn inverted so the current selection is obvious).
+void guiMassMenu(int sel) {
+  static const struct { const char* label; int textY; const unsigned char* icon; int iconX, iconY, iconW; }
+  ROWS[3] = {
+    { "Info",  26, img_quest, 46, 18, 7  },
+    { "Files", 40, img_sd,    44, 32, 11 },
+    { "Wipe",  54, img_alert, 46, 46, 9  },
+  };
+  static const int BOX_Y[3] = { 17, 31, 45 };    // inverted-bar top per row
+
+  guiBegin();
+  display.setFont(&Petme8x8);
+  display.setCursor(0, 11); display.print("Options");
+
+  for (int i = 0; i < 3; i++) {
+    uint16_t fg = SSD1306_WHITE;
+    if (i == sel) {
+      display.fillRect(0, BOX_Y[i], 60, 11, SSD1306_WHITE);
+      fg = SSD1306_BLACK;
+    }
+    display.setTextColor(fg);
+    display.setCursor(2, ROWS[i].textY); display.print(ROWS[i].label);
+    display.drawBitmap(ROWS[i].iconX, ROWS[i].iconY, ROWS[i].icon, ROWS[i].iconW, 8, fg);
+  }
+  display.setTextColor(SSD1306_WHITE);
+
+  display.drawBitmap(76, 13, img_bug, 42, 42, SSD1306_WHITE);
+  guiFooter();
+  display.setFont();
+  display.display();
+}
+
+// Tried to open a menu but nothing is plugged into the host port. Any button
+// returns to the home screen (handled by the caller).
+void guiNoDevice() {
+  guiBegin();
+  display.setFont(&Petme8x8);
+  display.setCursor(0, 11);  display.print("Cerberus");
+  display.setCursor(39, 37); display.print("No device");
+  display.drawBitmap(7, 24, img_folder, 21, 21, SSD1306_WHITE);
+  guiFooter();
+  display.setFont();
+  display.display();
+}
+
+// USB-killer (hostile voltage) detected.
+void guiBadUsb() {
+  guiBegin();
+  display.setFont(&Petme8x8);
+  display.setCursor(0, 11);  display.print("Cerberus");
+  display.setCursor(42, 39); display.print("USBKiller");
+  display.drawBitmap(6, 25, img_skull, 21, 21, SSD1306_WHITE);
+  guiFooter();
+  display.setFont();
+  display.display();
+}
+
+// HID attack detected. `devName` is the matched suspicious-device name (or
+// "unknown"); `kps` is the measured automated-typing speed in keys/sec.
+void guiHidDetect(const char* devName, float kps) {
+  guiBegin();
+  display.setFont(&Petme8x8);
+  display.setCursor(0, 11); display.print("Cerberus");
+  display.drawBitmap(4, 26, img_keyboard, 21, 21, SSD1306_WHITE);
+
+  display.setFont();                             // built-in 5x7 for the details
+  display.setCursor(34, 20); display.print("HID Device");
+  display.setCursor(34, 34); display.print(devName && devName[0] ? devName : "unknown");
+  char line[20];
+  snprintf(line, sizeof(line), "Auto %.0f k/s", (double)kps);
+  display.setCursor(34, 46); display.print(line);
+
+  guiFooter();
+  display.setFont();
+  display.display();
+}
+
+// Device descriptor page. `title` e.g. "Desc [1/3]"; `fields` holds up to 7
+// short "Key:Val" strings laid out in a two-column grid (the layout adapts to
+// however many are supplied, so pages with fewer fields stay clean).
+void guiDescPage(const char* title, const char* const* fields, int nFields) {
+  static const struct { int x, y; } SLOT[7] = {
+    {1,15},{59,15}, {1,26},{59,27}, {1,36},{59,37}, {1,46},
+  };
+  guiBegin();
+  display.setFont(&Petme8x8);
+  display.setCursor(0, 11); display.print(title);
+  display.drawBitmap(86, 0, img_help, 12, 16, SSD1306_WHITE);
+  guiFooter();
+
+  display.setFont();                             // built-in 5x7 for the fields
+  if (nFields > 7) nFields = 7;
+  for (int i = 0; i < nFields; i++) {
+    if (!fields[i]) continue;
+    display.setCursor(SLOT[i].x, SLOT[i].y);
+    display.print(fields[i]);
+  }
+  display.display();
+}
+
+// File analyzer list. Pulls each visible row's text through callbacks so the
+// caller needn't build arrays: nameOf/typeOf return the file name and its
+// magic-byte type for a global index. `count` total files, window at `top`,
+// `sel` highlighted. Up to 4 rows are shown with a scrollbar.
+#define GUI_FILELIST_VIS 3                       // rows shown at once (keep clear of footer)
+typedef const char* (*GuiRowTextFn)(int idx, void* ctx);
+void guiFileList(int count, int top, int sel,
+                 GuiRowTextFn nameOf, GuiRowTextFn typeOf, void* ctx) {
+  const int VIS = GUI_FILELIST_VIS;
+  const int ROWY[VIS] = { 19, 31, 43 };          // classic-font top-left y per row
+
+  guiBegin();
+  display.setFont(&Petme8x8);
+  display.setCursor(0, 11); display.print("Files");
+  display.drawBitmap(45, 3, img_hidden, 9, 8, SSD1306_WHITE);
+  guiFooter();
+
+  display.setFont();                             // built-in 5x7 for the rows
+  if (count == 0) {
+    display.setCursor(1, 28); display.print("(no files found)");
+  }
+  for (int r = 0; r < VIS && (top + r) < count; r++) {
+    int idx = top + r;
+    int y   = ROWY[r];
+    // Classic font draws DOWN from y, so the highlight bar spans y-1 .. y+7 and
+    // is wide enough to cover both the name and the type (type sat outside the
+    // old 100px bar, which is why it vanished when selected).
+    if (idx == sel) {
+      display.fillRect(0, y - 1, 121, 9, SSD1306_WHITE);
+      display.setTextColor(SSD1306_BLACK);
+    }
+    char nm[14]; snprintf(nm, sizeof(nm), "%.13s", nameOf ? nameOf(idx, ctx) : "?");
+    display.setCursor(1, y);  display.print(nm);
+    char tp[7];  snprintf(tp, sizeof(tp), "%.6s", typeOf ? typeOf(idx, ctx) : "");
+    display.setCursor(84, y); display.print(tp);
+    display.setTextColor(SSD1306_WHITE);
+  }
+  if (count > VIS) {                             // scrollbar, clear of the row bars
+    int barH = 36 * VIS / count; if (barH < 4) barH = 4;
+    int barY = 16 + (36 - barH) * top / (count - VIS);
+    display.drawFastVLine(124, 16, 36, SSD1306_WHITE);
+    display.fillRect(123, barY, 3, barH, SSD1306_WHITE);
+  }
+  display.display();
+}
+
+// Hex / magic-byte viewer. `fname` already truncated for the title; `type` the
+// detected file type (e.g. "PNG image"); `info` a short status line (e.g.
+// "145B HEX"); `rows` up to 3 pre-formatted hex lines ("000: 43 65 72 ...").
+void guiHexView(const char* fname, const char* type, const char* info,
+                const char* const* rows, int nRows) {
+  guiBegin();
+  display.setFont(&Petme8x8);
+  display.setCursor(0, 11);
+  char title[22]; snprintf(title, sizeof(title), "Hex: %.14s", fname ? fname : "");
+  display.print(title);
+  display.drawBitmap(93, 24, img_file_bug, 21, 21, SSD1306_WHITE);
+  guiFooter();
+
+  display.setFont();
+  display.setCursor(1, 15);
+  char tbuf[20]; snprintf(tbuf, sizeof(tbuf), "Type: %.13s", type ? type : "?");
+  display.print(tbuf);
+
+  display.setFont(&Picopixel);
+  display.setCursor(1, 30); display.print(info ? info : "");
+  if (nRows > 3) nRows = 3;
+  const int ROWY[3] = { 38, 45, 52 };
+  for (int i = 0; i < nRows; i++) {
+    if (!rows[i]) continue;
+    display.setCursor(1, ROWY[i]); display.print(rows[i]);
+  }
+  display.setFont();
+  display.display();
+}
+
+// GPT/partition-table wipe confirmation. UX: Ok wipes (destructive), Bak
+// cancels -- no on-screen Yes/No toggle; the soft-keys ARE the choice.
+void guiWipe() {
+  guiBegin();
+  display.setFont(&Petme8x8);
+  display.setCursor(0, 11); display.print("Wipe Device");
+  display.drawBitmap(13, 30, img_alert_tri, 21, 21, SSD1306_WHITE);
+  guiFooter();
+
+  display.setFont();
+  display.setCursor(7, 19);  display.print("Destroy GPT tables?");
+  display.setCursor(55, 32); display.print("This is");
+  display.setCursor(46, 41); display.print("Irreversible");
+  display.display();
+}

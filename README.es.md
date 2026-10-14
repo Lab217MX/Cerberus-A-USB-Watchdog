@@ -204,14 +204,11 @@ El firmware utiliza ambos cores del RP2040:
 - **Interfaz OLED**: GUI con iconos, estados y vista de descriptores USB.
 - **Comandos serial**: Interface de texto para debugging y forense (HELP, STATUS, LAST, HEXDUMP, etc.).
 
-### Companion App (cerberus_listener.py)
+### Companion App (cerberus_listener.py) — descontinuada
 
-Aplicacion GUI en Python/Tkinter para monitoreo en tiempo real:
+> ⚠️ **La app de escritorio ya no tiene soporte y fue eliminada del repositorio.** Todo el monitoreo y análisis ahora ocurre en el propio dispositivo (OLED) y por la consola serial (`HELP`, `STATUS`, `LAST`, `SCAN`, `INSPECT`, …), que funciona con cualquier terminal serial y no requiere software extra. Versiones anteriores quedan en el historial de git, pero están sin mantenimiento.
 
-- **Conexion serial**: Auto-deteccion del dispositivo, reconexion automatica.
-- **Log con filtros**: Colores por severidad, busqueda, filtrado por categoria.
-- **Analizador de payloads**: Detecta patrones de ataque (GUI+R, powershell, etc.) y calcula velocidad de tecleo.
-- **Modo Red Team**: Exportacion de keystrokes capturados a DuckyScript, comandos rapidos, filtro para bug CTRL del Flipper Zero.
+> ℹ️ Las funciones nuevas (analizador de archivos por magic bytes, inspección de ZIP/polyglots, GUI rediseñada, comandos `SCAN`/`INSPECT`) están documentadas en detalle en el [README en inglés](README.md); esta traducción puede ir por detrás.
 
 ---
 

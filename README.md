@@ -33,9 +33,12 @@ Instead of blindly trusting a flash drive you found or were handed, you plug it 
 - **Detects USB Killer** — alerts on high-voltage spikes (and blocks them with the optional isolator).
 - **Watches reads and writes** — warns if the USB tries to read `AUTORUN`/`README` or write/delete files on its own.
 - **Suspicious-device database** — recognizes known attack hardware by its VID/PID.
+- **On-device file analyzer** — recursively lists every file on the drive and identifies each one by its **magic bytes** (PNG, PDF, ELF, PE/EXE, ZIP, …), flagging files whose real type doesn't match their extension (e.g. an `.jpg` that is actually an executable). Reads file contents only, never executes.
+- **Archive & polyglot inspection** — looks *inside* ZIP archives (via the central directory) for embedded executables/scripts and sweeps files for signatures hidden *after* a valid header (appended payloads / polyglots). Signature-only — nothing is decompressed, so it is immune to zip bombs.
+- **Redesigned OLED GUI** — dedicated screens for the home/self-test, mass-storage detection, options menu, USB descriptors, file analyzer, hex viewer, and wipe confirmation, with on-screen `Ok`/`Bak` hints.
 - **Full visibility** — OLED screen, NeoPixel LED, and serial console showing everything that happens.
 - **Forensics & red team** — captures keystrokes, exports to DuckyScript, and stores info on the last device.
-- **Neutralize suspicious drives** — manually wipe the MBR/GPT tables of the mounted USB (hold "Bak" ~3 s or the `WIPE` command); never triggered automatically.
+- **Neutralize suspicious drives** — manually wipe the MBR/GPT tables of the mounted USB (from the on-device **Wipe** menu or the `WIPE` serial command); never triggered automatically.
 
 > Built for cybersecurity professionals (SOC, blue team, and red team) as a USB test bench, BadUSB payload debugger, and basic forensic triage tool. Built on top of [USBvalve](https://github.com/cecio/USBvalve).
 
@@ -93,17 +96,18 @@ The idea is simple: **Cerberus sits between your computer and the USB you want t
 
 ### Step by step
 
-1. **Power Cerberus.** Connect it to your computer with a USB cable (the RP2040's native port). On boot, the OLED shows "Selftest: OK" and the LED turns **blue**: ready to go.
+1. **Power Cerberus.** Connect it to your computer with a USB cable (the RP2040's native port). On boot, the OLED shows the home screen with "Self-Test:ok" and the LED turns **blue**: ready to go.
 2. **Plug the suspicious USB** into Cerberus's host port (not into your computer).
 3. **Watch the reaction in real time.** Cerberus pretends to be a PC and lets the device act. The screen, the LED, and the serial console tell you immediately what it's trying to do.
 4. **Read the verdict** using the indicator table below: blue = normal, red/orange/magenta = suspicious.
-5. **(Optional) Dig deeper** with the physical buttons to view USB descriptors, or with the serial commands for forensic analysis and keystroke capture.
+5. **Inspect a storage device.** When a mass-storage drive is attached, the OLED shows a **Mass storage** detection screen; press **Ok** to open the options menu — **Info** (USB descriptors), **Files** (the magic-byte file analyzer), and **Wipe** (neutralize partition tables). In the file analyzer, pick any file to see its detected type, size, and a hex view, plus a warning if it hides an executable/appended payload.
+6. **(Optional) Dig deeper over serial** for forensic analysis, keystroke capture, and the `SCAN` / `INSPECT` commands (see below).
 
 ### Screen and LED indicators
 
 | Event                       | OLED message       | LED color |
 | --------------------------- | ------------------ | --------- |
-| Ready/Normal                | "Cerberus Ready"   | Blue      |
+| Ready/Normal (home)         | "Self-Test:ok"     | Blue      |
 | README read                 | "README (R)"       | Blue      |
 | AUTORUN read                | "AUTORUN (R)"      | Blue      |
 | Write detected              | "WRITING"          | Blue      |
@@ -113,19 +117,23 @@ The idea is simple: **Cerberus sits between your computer and the USB you want t
 | Suspicious device           | "SUSP: [name]"     | Orange    |
 | Automated typing (BadUSB)   | "AUTO [X] k/s"     | Magenta   |
 | USB Killer detected         | "USB Killer"       | Red       |
-| Mass storage device         | "Mass Device"      | Green     |
-| Wipe countdown              | "Hold: WIPE Ns"    | —         |
+| Mass storage detected       | "Mass storage"     | Green     |
 | Wipe in progress            | "WIPING DISK"      | —         |
 | Wipe complete               | "WIPE DONE"        | —         |
 | Wipe error                  | "WIPE ERROR"       | —         |
 
 ### Physical buttons
 
-- **BTN_RST** ("Bak"): A short press cycles through the USB descriptor pages; holding it ~3 s with a storage device mounted neutralizes its MBR/GPT tables (wipe)
-- **BTN_OK**: Exit the descriptor view / refresh the screen
+The OLED is driven by four soft-keys. Every screen shows `Ok` / `Bak` hints in the bottom-right; `Up` / `Down` move the selection where a list is shown.
+
+- **Ok** (Accept): open the options menu when a device is attached (on the home screen), enter the highlighted item, toggle hex/ASCII in the hex viewer, and confirm a wipe. On the "No device" screen, any key returns home.
+- **Up / Down**: move through menu items and file lists.
+- **Bak**: go back one level / exit a menu (disabled on the mass-storage detection screen, which only opens the menu).
 - **BOOTSEL**:
-  - Short press: Reboot the device
-  - Press >2s: Show the HID event count
+  - Short press: reboot the device
+  - Press >2 s: show the HID event count
+
+USB descriptor pages and the partition wipe now live inside the on-device **Info** and **Wipe** menu items (no more button-hold shortcuts).
 
 ### Serial port commands
 
@@ -143,6 +151,13 @@ Connect over serial (SerialTinyUSB) and type these commands:
 | `HIDDEBUG` | Toggle HID debug (raw bytes)               |
 | `CLEAR`    | Clear info on the last device              |
 | `WIPE`     | Neutralize the MBR/GPT tables of the mounted USB |
+| `LS [path]`  | List a directory on the USB (`LS /` = volume list; `LS /N` = volume N) |
+| `CAT path`   | Preview a file on the USB (text + hex)     |
+| `SCAN`       | Recursively list every file with its magic-byte type, size, first bytes, and archive/polyglot warnings |
+| `INSPECT path` | Deep look inside one file: ZIP entry listing + 1 MB embedded-signature sweep |
+| `BROWSE`     | Open the file analyzer on the OLED         |
+
+> On connecting a terminal, Cerberus prints a banner — wait ~2 s for it. `VERBOSE` is **off by default** (it logs every emulated-disk sector read/write and otherwise floods the console); enable it only to debug disk I/O.
 
 ---
 
@@ -158,7 +173,11 @@ Cerberus doesn't just cut the data lines: **it impersonates a real computer** so
 
 - **USB Killer.** A hardware circuit monitors the port voltage; on a high-voltage spike it fires an immediate alert. With the galvanic isolator, the discharge is also **physically blocked** so it never reaches your computer.
 
+- **Disguised files on the drive.** Beyond live behavior, Cerberus can read a mounted drive (read-only) and inspect its files without trusting it on a real PC. It identifies each file by its **magic bytes** rather than its extension — so an `invoice.pdf` that is really a Linux/Windows executable is flagged immediately — and it inspects ZIP archives (by their central directory) and sweeps for signatures appended after a valid header, catching executables smuggled inside archives or polyglot files. It is a signature pass only (nothing is run or decompressed), so it is safe even against zip bombs.
+
 Each detection is turned right away into a message on the OLED, an LED color, and a line over the serial port, giving you a clear verdict without having to risk a real machine.
+
+> **On magic-byte inspection:** it reads the *first* bytes of each file and the ZIP index, so it reliably flags extension/type mismatches and named executables inside archives. It does not decompress DEFLATE entries (RAM-constrained MCU), so a payload *compressed* inside an archive is identified by its entry name, not its inner magic bytes.
 
 ---
 
@@ -201,17 +220,13 @@ The firmware uses both cores of the RP2040:
 - **Threat detection**: USB Killer (via hardware interrupt), suspicious devices (VID/PID database), and automated BadUSB writing (HID speed analysis).
 - **MSC emulation**: Virtual RAM disk that detects README/AUTORUN reads and malicious writes.
 - **HID processing**: Decoding of keyboard/mouse reports with support for modifiers and special keys.
-- **OLED interface**: GUI with icons, states, and a USB descriptor view.
-- **Serial commands**: Text interface for debugging and forensics (HELP, STATUS, LAST, HEXDUMP, etc.).
+- **File analyzer**: Read-only, multi-filesystem (FAT/exFAT/NTFS/ext/ISO9660) reader that recursively lists files, types them by magic bytes, and inspects ZIP archives and appended-payload signatures. Exposed on the OLED (**Files** menu) and over serial (`SCAN` / `INSPECT`).
+- **OLED interface**: Screen library (`GUI_Base.h`) with dedicated screens — home/self-test, mass-storage detection, options menu, descriptor pages, file list, hex viewer, wipe confirmation, HID/USB-Killer alerts — rendered only from core 0 to avoid cross-core I2C contention.
+- **Serial commands**: Text interface for debugging and forensics (HELP, STATUS, LAST, SCAN, INSPECT, WIPE, …).
 
-### Companion App (cerberus_listener.py)
+### Companion App (cerberus_listener.py) — discontinued
 
-A Python/Tkinter GUI app for real-time monitoring:
-
-- **Serial connection**: Auto-detection of the device, automatic reconnection.
-- **Filtered log**: Severity colors, search, category filtering.
-- **Payload analyzer**: Detects attack patterns (GUI+R, powershell, etc.) and computes typing speed.
-- **Red Team mode**: Export of captured keystrokes to DuckyScript, quick commands, filter for the Flipper Zero CTRL bug.
+> ⚠️ **The desktop companion app is no longer supported and has been removed from the repository.** All monitoring and analysis now happen on-device (OLED) and over the plain serial console (`HELP`, `STATUS`, `LAST`, `SCAN`, `INSPECT`, …), which work with any serial terminal and need no extra software. Earlier versions of the app can still be found in the project's git history, but they are unmaintained and may not reflect the current firmware.
 
 ---
 

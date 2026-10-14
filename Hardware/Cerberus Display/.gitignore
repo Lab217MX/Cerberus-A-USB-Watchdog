@@ -1,0 +1,9 @@
+# Editor local-history cruft (contains its own nested .git)
+.history/
+
+# KiCad backups / autosave
+*-backups/
+*.kicad_pcb-bak
+*.kicad_sch-bak
+_autosave-*
+fp-info-cache

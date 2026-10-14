@@ -17,3 +17,9 @@ Módulo aislador USB basado en el chip ADUM3160. Proporciona protección contra 
 - **Función:** Aísla eléctricamente el host del dispositivo USB, bloqueando picos de alto voltaje
 - **Uso:** Complemento opcional para añadir una capa extra de seguridad física
 - **Más información:** Ver [ADUM3160 USB Isolator/README.md](ADUM3160%20USB%20Isolator/README.md)
+
+### Cerberus Display/
+
+Placa de display (OLED + botones) en KiCad. Proyecto editable disponible; los Gerbers y Pick & Place aún **no se liberan** porque la placa está en validación.
+
+- **Más información:** Ver [Cerberus Display/README.md](Cerberus%20Display/README.md)

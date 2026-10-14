@@ -1,0 +1,6 @@
+# Generated test images and compiled test binaries (regenerate via run.sh).
+work/
+img/
+test_ext
+test_ntfs
+test_iso
