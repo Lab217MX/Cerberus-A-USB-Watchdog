@@ -1441,7 +1441,7 @@ void explorer_menu() {
         case 2:                                       // Wipe
           if (menu_wipe_confirm()) {
             // Wipe armed: leave the menu so loop() can render its progress.
-            showStatus("WIPING DISK", LOGO_ALERT_SYMBOL);
+            guiWipingProgress();
             setNeoColor(255, 165, 0);
             nav_wait_release();
             return;

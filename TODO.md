@@ -1,54 +1,59 @@
-# TODO — pantallas OLED pendientes
+# TODO — pantallas OLED
 
-El rediseño de la GUI (`Software/Cerberus/GUI_Base.h`) ya cubre las pantallas
-principales. Estos **mensajes/eventos todavía usan el renderer genérico**
-`draw()` / `showStatus(texto, logo)` (título "Cerberus" + icono + texto centrado)
-y **les falta una pantalla propia** en `GUI_Base.h`. Diseñarlas queda pendiente.
+Todas las pantallas de mensajes/eventos ya tienen una vista propia en
+`Software/Cerberus/GUI_Base.h` y están **cableadas** a sus eventos. El renderer
+genérico heredado (`draw()` + `resources.h`) fue eliminado: `GUI_Base.h` es la
+única fuente de pantallas.
 
-## Pantallas ya hechas (referencia)
+## Pantallas (todas ✅)
 
-- Home / self-test → `guiMainMenu`
-- Mass storage detectado → `guiMassDetect`
-- Menú de opciones (Info/Files/Wipe) → `guiMassMenu`
-- Descriptores USB → `guiDescPage`
-- Lista de archivos (analizador) → `guiFileList`
-- Visor hex / magic bytes → `guiHexView`
-- Confirmación de wipe → `guiWipe`
-- USB Killer → `guiBadUsb`
-- HID sospechoso / tecleo automático → `guiHidDetect`
-- Sin dispositivo → `guiNoDevice`
+### Principales
+- [x] Home / self-test → `guiMainMenu`
+- [x] Mass storage detectado → `guiMassDetect`
+- [x] Menú de opciones (Info/Files/Wipe) → `guiMassMenu`
+- [x] Descriptores USB → `guiDescPage`
+- [x] Lista de archivos (analizador) → `guiFileList`
+- [x] Visor hex / magic bytes → `guiHexView`
+- [x] Confirmación de wipe → `guiWipe`
+- [x] USB Killer → `guiBadUsb`
+- [x] Sin dispositivo → `guiNoDevice`
 
-## Pendientes de diseñar
-
-### Actividad del disco emulado (lecturas/escrituras del host)
-- [ ] **README leído** — `"README (R)"`
-- [ ] **AUTORUN leído** — `"AUTORUN (R)"`
-- [ ] **Escritura detectada** — `"WRITING"`
-- [ ] **Borrado detectado** — `"DELETING"`
+### Actividad del disco emulado
+- [x] README leído → `guiReadmeRead`
+- [x] AUTORUN leído → `guiAutorunRead`
+- [x] Escritura detectada → `guiWriting`
+- [x] Borrado detectado → `guiDeleting`
 
 ### Dispositivos conectados
-- [ ] **HID conectado** (aviso de montaje, distinto de la alerta de amenaza) — `"HID Device"`
-- [ ] **HID enviando datos** — `"HID Sending data"`
-- [ ] **CDC conectado** — `"CDC Device"`
+- [x] HID conectado (montaje) → `guiHidMount` (bandera core1→core0)
+- [x] HID enviando datos / tecleo automático → `guiHidSendData`
+- [x] Dispositivo sospechoso (VID/PID) → `guiHidMount`
+- [x] CDC conectado → `guiCdcDevice` (bandera core1→core0)
 
-### Wipe (progreso / resultado)
-- [ ] **Wipe en progreso** — `"WIPING DISK"`
-- [ ] **Wipe completado** — `"WIPE DONE"`
-- [ ] **Wipe con error** — `"WIPE ERROR"`
+### Wipe
+- [x] Wipe en progreso → `guiWipingProgress`
+- [x] Wipe completado → `guiWipingDone`
+- [x] Wipe con error → `guiWipingError`
 
 ### Sistema
-- [ ] **Self-test fallido** — `"Selftest: KO"` + `"Stopping..."`
-- [ ] **Reset de contadores (cmd RESET)** — `"Reset OK"`
-- [ ] **Reinicio (cmd REBOOT)** — `"REBOOT"`
-- [ ] **Reinicio por BOOTSEL corto** — `"RESETTING"`
-- [ ] **Conteo de eventos HID (BOOTSEL largo)** — `"HID Evt# N"` (texto dinámico)
-- [ ] **Mensajes genéricos de la cola de callbacks del host** — `showStatus(msg.text)` (texto variable)
+- [x] Self-test fallido → `guiBadSelftest`
+- [x] Reset de contadores (RESET) → `guiGenericMsg("Reset OK")`
+- [x] Reinicio (REBOOT) → `guiReboot`
+- [x] Reinicio por BOOTSEL corto → `guiResetting`
+- [x] Conteo de eventos HID (BOOTSEL largo) → `guiHidEvents(n)`
+- [x] Mensajes genéricos de la cola del host → `guiGenericMsg(texto)`
 
-## Nota
+## Limpieza
 
-Mientras existan estos mensajes en `draw()`/`showStatus`, **`resources.h` sigue
-siendo necesario** (provee `LOGO_USB_CONNECTED` / `LOGO_ALERT_SYMBOL` /
-`LOGO_EVIL_SYMBOL`, `LOGO_ASSETS` y los bitmaps `image_Lock_bits` /
-`image_Quest_bits`). Al migrar todo lo anterior a `GUI_Base.h` (idealmente con un
-`guiStatus(texto, icono)` genérico que reemplace a `draw()`), se podrá eliminar
-`resources.h`. El único símbolo ya muerto hoy es `image_arrow_curved_left_up_bits`.
+- [x] **`resources.h` eliminado.** Se quitó el renderer viejo `draw()` y el
+  sistema de logos (`LOGO_ASSETS` / `image_Lock_bits` / `image_Quest_bits`). Sus
+  usos se reemplazaron por pantallas de `GUI_Base.h`: splash de boot →
+  `guiMainMenu("Booting...")`, fallback de `redraw_resting()` → `guiGenericMsg`,
+  y `showStatus()` quedó como wrapper fino sobre `guiGenericMsg`.
+
+## Notas de diseño
+
+- Los callbacks de core1 (`tuh_hid_mount_cb`, `tuh_cdc_mount_cb`,
+  `tuh_msc_mount_cb`) **no dibujan**: solo levantan una bandera y core0 pinta en
+  `loop()`, para evitar la carrera de I2C entre cores.
+- Varias pantallas de estado muestran "By: Lab217" vía `guiByline()`.

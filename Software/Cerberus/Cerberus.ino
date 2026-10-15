@@ -36,7 +36,6 @@
 #include <Adafruit_NeoPixel.h>
 #include <string.h>
 #include <ctype.h>
-#include "resources.h"
 #include "Petme8x8.h"    // Custom GFX fonts used by the on-device mass-storage menu
 #include "Picopixel.h"
 
@@ -91,7 +90,6 @@ void exit_descriptor_view();
 dev_info_t* get_first_mounted_device();
 void reinit_display();
 void showStatus(const char* message, uint8_t logoIndex);
-void draw(const char* text, uint8_t logoIndex);
 void showHome(const char* line);     // idle home screen (GUI_Base guiMainMenu)
 void redraw_resting();               // repaint the resting screen (home or last status)
 
@@ -102,6 +100,9 @@ char g_homeLine[20] = "Self-Test:ok";
 bool g_homeActive   = false;
 bool g_noDeviceActive = false;       // the "No device" screen is up (any key -> home)
 volatile bool g_massActive = false;  // mass device attached: detection screen is resting
+volatile bool g_hidMountReq = false; // HID attached (core1 -> core0 draws guiHidMount)
+char          g_hidMountName[16] = {0};
+volatile bool g_cdcMountReq = false; // CDC attached (core1 -> core0 draws guiCdcDevice)
 
 // Define the dimension of RAM DISK. We have a "real" one (for which
 // a real array is created) and a "fake" one, presented to the OS
@@ -149,7 +150,6 @@ bool descriptor_view_active = false;
 uint8_t descriptor_page = 0;
 uint hid_event_num = 0;
 char current_gui_message[64] = "Cerberus Ready";
-uint8_t current_logo_index = LOGO_USB_CONNECTED;
 
 //
 // HID Speed Detection - Detects automated typing (BadUSB)
@@ -441,7 +441,7 @@ void setup() {
   display.begin(SSD1306_SWITCHCAPVCC, I2C_ADDRESS);
 
   cls();
-  draw(current_gui_message, current_logo_index);
+  guiMainMenu("Booting...");
   statusPixel.begin();
   statusPixel.setBrightness(50);
   setNeoColor(0, 0, 255);  // Blue as the initial neutral status
@@ -449,8 +449,8 @@ void setup() {
   if (computed_hash == valid_hash) {
     showHome("Self-Test:ok");
   } else {
-    showStatus("Selftest: KO", LOGO_ALERT_SYMBOL);
-    showStatus("Stopping...", LOGO_ALERT_SYMBOL);
+    guiBadSelftest();
+    SerialTinyUSB.println("Selftest: KO -- stopping");
     while (1) {
       delay(1000);
     }
@@ -500,10 +500,10 @@ void loop() {
   // Drain any text queued from host callbacks (running on core1)
   DisplayMsg msg;
   while (queue_try_remove(&display_queue, &msg)) {
-    if (descriptor_view_active) {
-      SerialTinyUSB.println(msg.text);
-    } else {
-      showStatus(msg.text, LOGO_USB_CONNECTED);
+    SerialTinyUSB.println(msg.text);
+    if (!descriptor_view_active) {
+      g_homeActive = false;
+      guiGenericMsg(msg.text);
     }
   }
 
@@ -575,33 +575,38 @@ void loop() {
   }
 
   if (readme == true) {
-    showStatus("README (R)", LOGO_USB_CONNECTED);
+    guiReadmeRead();
+    SerialTinyUSB.println("README (R)");
     readme = false;
     setNeoColor(0, 0, 255);
   }
 
   if (autorun == true) {
-    showStatus("AUTORUN (R)", LOGO_USB_CONNECTED);
+    guiAutorunRead();
+    SerialTinyUSB.println("AUTORUN (R)");
     autorun = false;
     setNeoColor(0, 0, 255);
   }
 
   if (deleted == true && deleted_reported == false) {
-    showStatus("DELETING", LOGO_USB_CONNECTED);
+    guiDeleting();
+    SerialTinyUSB.println("DELETING");
     deleted = false;
     deleted_reported = true;
     setNeoColor(0, 0, 255);
   }
 
   if (written == true && written_reported == false) {
-    showStatus("WRITING", LOGO_USB_CONNECTED);
+    guiWriting();
+    SerialTinyUSB.println("WRITING");
     written = false;
     written_reported = true;
     setNeoColor(0, 0, 255);
   }
 
   if (hid_sent == true && hid_reported == false) {
-    showStatus("HID Sending data", LOGO_ALERT_SYMBOL);
+    guiHidSendData(suspicious_name[0] ? suspicious_name : "unknown", hid_current_speed);
+    SerialTinyUSB.println("HID Sending data");
     hid_sent = false;
     hid_reported = true;
     setNeoColor(255, 0, 0);
@@ -609,8 +614,8 @@ void loop() {
 
   if (suspicious_device == true && suspicious_reported == false) {
     g_homeActive = false;
-    guiHidDetect(suspicious_name, hid_current_speed);
-    SerialTinyUSB.printf("[!] Suspicious HID: %s (%.1f k/s)\r\n", suspicious_name, hid_current_speed);
+    guiHidMount(suspicious_name);
+    SerialTinyUSB.printf("[!] Suspicious HID: %s\r\n", suspicious_name);
     suspicious_device = false;
     suspicious_reported = true;
     setNeoColor(255, 165, 0);
@@ -618,7 +623,7 @@ void loop() {
 
   if (hid_speed_alert == true && hid_speed_reported == false) {
     g_homeActive = false;
-    guiHidDetect(suspicious_name[0] ? suspicious_name : "unknown", hid_current_speed);
+    guiHidSendData(suspicious_name[0] ? suspicious_name : "unknown", hid_current_speed);
     SerialTinyUSB.printf("[!!!] AUTOMATED TYPING: %.1f keys/sec\r\n", hid_current_speed);
     hid_speed_reported = true;
     setNeoColor(255, 0, 255);
@@ -628,15 +633,32 @@ void loop() {
     }
   }
 
+  // HID / CDC attach notices: the callbacks run on core1 and only raise a flag;
+  // draw here on core0 so the OLED (I2C) is never touched from two cores at once.
+  if (g_hidMountReq) {
+    g_hidMountReq = false;
+    g_homeActive = false;
+    guiHidMount(g_hidMountName);
+    setNeoColor(255, 0, 0);
+  }
+  if (g_cdcMountReq) {
+    g_cdcMountReq = false;
+    g_homeActive = false;
+    guiCdcDevice("");
+    setNeoColor(0, 255, 0);
+  }
+
   // Partition-wipe outcome (flags are set by core1 in wipe_write_complete_cb)
   if (wipe_done == true && wipe_done_reported == false) {
-    showStatus("WIPE DONE", LOGO_USB_CONNECTED);
+    guiWipingDone();
+    SerialTinyUSB.println("WIPE DONE");
     wipe_done_reported = true;
     setNeoColor(0, 255, 0);
   }
 
   if (wipe_error == true && wipe_error_reported == false) {
-    showStatus("WIPE ERROR", LOGO_EVIL_SYMBOL);
+    guiWipingError();
+    SerialTinyUSB.println("WIPE ERROR");
     wipe_error_reported = true;
     setNeoColor(255, 0, 0);
   }
@@ -650,12 +672,12 @@ void loop() {
     uint32_t press_duration = press_end - press_start;
 
     if (press_duration > 2000) {              // Press duration > 2sec
-      // Print the number of HID events detected so far
-      char outstr[22];
-      snprintf(outstr, sizeof(outstr), "HID Evt# %d", hid_event_num);
-      showStatus(outstr, LOGO_USB_CONNECTED);
+      // Show the number of HID events detected so far
+      guiHidEvents(hid_event_num);
+      SerialTinyUSB.printf("HID Evt# %d\r\n", hid_event_num);
     } else {
-      showStatus("RESETTING", LOGO_USB_CONNECTED);
+      guiResetting();
+      SerialTinyUSB.println("RESETTING");
       swreset();
     }
   }
@@ -805,24 +827,22 @@ void print_banner() {
 }
 
 // Updates the cached GUI message/icon and mirrors the same text over serial.
+// Legacy generic-status entry point, now a thin wrapper over the GUI_Base
+// generic-message screen (the old draw()/logo renderer is gone). Kept so any
+// remaining/future caller still works; `logoIndex` is no longer used.
 void showStatus(const char* str, uint8_t logoIndex) {
+  (void)logoIndex;
   g_homeActive = false;                 // a transient status replaces the home screen
   g_noDeviceActive = false;             // ...and dismisses the "No device" screen
   const char* sanitized = str;
   while (*sanitized == '\n') {
     sanitized++;
   }
-
-  if (LOGO_COUNT > 0) {
-    current_logo_index = logoIndex % LOGO_COUNT;
-  } else {
-    current_logo_index = 0;
-  }
   strncpy(current_gui_message, sanitized, sizeof(current_gui_message) - 1);
   current_gui_message[sizeof(current_gui_message) - 1] = '\0';
 
   if (!descriptor_view_active) {
-    draw(current_gui_message, current_logo_index);
+    guiGenericMsg(current_gui_message);
   }
   SerialTinyUSB.println(str);
 }
@@ -843,7 +863,7 @@ void showHome(const char* line) {
 void redraw_resting() {
   if (g_massActive && (get_first_mounted_device() != NULL || g_mscPresent)) guiMassDetect();
   else if (g_homeActive) guiMainMenu(g_homeLine);
-  else                   draw(current_gui_message, current_logo_index);
+  else                   guiGenericMsg(current_gui_message);
 }
 
 dev_info_t* get_first_mounted_device() {
@@ -1173,8 +1193,10 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_re
 
   tuh_vid_pid_get(dev_addr, &vid, &pid);
 
-  showStatus("HID Device", LOGO_ALERT_SYMBOL);
-  setNeoColor(255, 0, 0);
+  // Defer the OLED draw to core0 (I2C is core0-only): flag it and stash the name.
+  strncpy(g_hidMountName, protocol_str[itf_protocol], sizeof(g_hidMountName) - 1);
+  g_hidMountName[sizeof(g_hidMountName) - 1] = '\0';
+  g_hidMountReq = true;
 
   SerialTinyUSB.printf("HID device address = %d, instance = %d mounted\r\n", dev_addr, instance);
   SerialTinyUSB.printf("VID = %04x, PID = %04x\r\n", vid, pid);
@@ -1656,8 +1678,8 @@ bool wipe_write_complete_cb(uint8_t dev_addr, tuh_msc_complete_data_t const* cb_
 
 // Invoked when a device with CDC (Communication Device Class) interface is mounted
 void tuh_cdc_mount_cb(uint8_t idx) {
-  showStatus("CDC Device", LOGO_USB_CONNECTED);
-  setNeoColor(0, 255, 0);
+  // Defer the OLED draw to core0 (I2C is core0-only): just flag it here.
+  g_cdcMountReq = true;
   SerialTinyUSB.printf("CDC Device attached, idx = %d\r\n", idx);
 }
 
@@ -1757,11 +1779,11 @@ void process_serial_command(const char* cmd) {
     hid_reported = false;
     suspicious_reported = false;
     SerialTinyUSB.println("[+] Counters reset");
-    showStatus("Reset OK", LOGO_USB_CONNECTED);
+    guiGenericMsg("Reset OK");
   }
   else if (strcmp(upper, "REBOOT") == 0) {
     SerialTinyUSB.println("[+] Rebooting...");
-    showStatus("REBOOT", LOGO_USB_CONNECTED);
+    guiReboot();
     delay(500);
     swreset();
   }
@@ -1796,7 +1818,7 @@ void process_serial_command(const char* cmd) {
       wipe_done_reported = false;
       wipe_error_reported = false;
       wipe_requested = true;
-      showStatus("WIPING DISK", LOGO_ALERT_SYMBOL);
+      guiWipingProgress();
       setNeoColor(255, 165, 0);
     }
   }
@@ -1899,33 +1921,3 @@ const char* check_suspicious_device(uint16_t vid, uint16_t pid) {
 }
 
 // GUI renderer: draws a static frame plus the selected icon and status text.
-void draw(const char* text, uint8_t logoIndex) {
-    // Clear the entire framebuffer to avoid leftover pixels from earlier frames
-    display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
-    display.setTextWrap(false);
-
-    // Header
-    display.setCursor(0, 0);
-    display.println("Cerberus");
-    display.drawBitmap(51, 0, image_Lock_bits, 7, 8, SSD1306_WHITE);
-
-    // Footer / soft-keys: at the status screen only "Accept" is live (opens the menu)
-    display.drawBitmap(2, 54, image_Quest_bits, 7, 8, SSD1306_WHITE);
-    display.setCursor(12, 54);
-    display.println("Accept: Menu");
-
-    // Main icon
-    const LogoAsset& asset = LOGO_ASSETS[(LOGO_COUNT > 0) ? (logoIndex % LOGO_COUNT) : 0];
-    display.drawBitmap(50, 16, asset.bits, asset.width, asset.height, SSD1306_WHITE);
-
-    // Center the label horizontally on y = 36
-    int16_t x1, y1;
-    uint16_t w, h;
-    display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-    int16_t x = (int16_t)((OLED_WIDTH - (int16_t)w) / 2);
-    if (x < 0) x = 0;
-    display.setCursor(x, 36);
-    display.println(text);
-    display.display();
-}
